@@ -458,13 +458,14 @@ function LeadsPipelineContent() {
                         <td className="py-3 px-3">
                           {hasSite && lead.website ? (
                             <a
-                              href={lead.website}
+                              href={lead.website.startsWith("http") ? lead.website : `https://${lead.website}`}
                               target="_blank"
                               rel="noreferrer"
-                              className="text-blue-400 hover:underline inline-flex items-center gap-1 max-w-[120px] truncate"
+                              className="text-blue-400 hover:text-blue-300 hover:underline inline-flex items-center gap-1 max-w-[130px] truncate"
                             >
                               <Globe className="h-3 w-3 flex-shrink-0" />
-                              <span className="truncate">{lead.website.replace(/^https?:\/\//, "")}</span>
+                              <span className="truncate">{lead.website.replace(/^https?:\/\/(www\.)?/, "")}</span>
+                              <ExternalLink className="h-2.5 w-2.5 flex-shrink-0 opacity-70" />
                             </a>
                           ) : (
                             <span className="inline-flex items-center gap-1 text-rose-400 font-semibold px-1.5 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-[10px]">

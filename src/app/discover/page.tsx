@@ -21,6 +21,7 @@ import {
   RefreshCw,
   Star,
   Globe,
+  ExternalLink,
   Phone,
   Layers,
   XCircle,
@@ -360,10 +361,17 @@ function DiscoveryContent() {
                           </td>
 
                           <td className="py-3 px-4">
-                            {lead.hasWebsite ? (
-                              <span className="inline-flex items-center gap-1 text-blue-400 text-xs font-medium">
-                                <Globe className="h-3 w-3" /> Has Website
-                              </span>
+                            {lead.hasWebsite && lead.website ? (
+                              <a
+                                href={lead.website.startsWith("http") ? lead.website : `https://${lead.website}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1.5 text-blue-400 hover:text-blue-300 hover:underline text-xs font-medium max-w-[150px] truncate"
+                              >
+                                <Globe className="h-3.5 w-3.5 flex-shrink-0" />
+                                <span className="truncate">{lead.website.replace(/^https?:\/\/(www\.)?/, "")}</span>
+                                <ExternalLink className="h-3 w-3 flex-shrink-0 opacity-70" />
+                              </a>
                             ) : (
                               <span className="inline-flex items-center gap-1 text-rose-400 font-semibold px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-[10px]">
                                 <XCircle className="h-3 w-3" /> No Website

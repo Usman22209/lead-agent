@@ -246,12 +246,20 @@ export default function DashboardPage() {
                       </div>
 
                       <div className="flex items-center gap-2.5 flex-shrink-0">
-                        {hasSite ? (
-                          <span className="hidden sm:inline-flex text-[10px] font-medium text-blue-400 px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20">
-                            Has Website
-                          </span>
+                        {hasSite && item.website ? (
+                          <a
+                            href={item.website.startsWith("http") ? item.website : `https://${item.website}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-blue-400 hover:text-blue-300 hover:underline px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/20 max-w-[150px] truncate"
+                          >
+                            <Globe className="h-3 w-3 flex-shrink-0" />
+                            <span className="truncate">{item.website.replace(/^https?:\/\/(www\.)?/, "")}</span>
+                            <ExternalLink className="h-2.5 w-2.5 flex-shrink-0 opacity-70" />
+                          </a>
                         ) : (
-                          <span className="hidden sm:inline-flex text-[10px] font-semibold text-rose-400 px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20">
+                          <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold text-rose-400 px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20">
                             No Website
                           </span>
                         )}

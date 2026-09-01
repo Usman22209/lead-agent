@@ -336,12 +336,13 @@ export default function LeadDetailPage({
                     <Globe className="h-3.5 w-3.5 text-blue-400 flex-shrink-0" />
                     {lead.website ? (
                       <a
-                        href={lead.website}
+                        href={lead.website.startsWith("http") ? lead.website : `https://${lead.website}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-blue-400 hover:underline truncate max-w-[200px]"
+                        className="text-blue-400 hover:text-blue-300 hover:underline truncate max-w-[220px] inline-flex items-center gap-1 font-medium"
                       >
-                        {lead.website.replace(/^https?:\/\//, "")}
+                        <span className="truncate">{lead.website.replace(/^https?:\/\/(www\.)?/, "")}</span>
+                        <ExternalLink className="h-3 w-3 flex-shrink-0 opacity-70" />
                       </a>
                     ) : (
                       <span className="text-rose-400 font-medium">No Website Detected</span>
@@ -349,10 +350,11 @@ export default function LeadDetailPage({
                   </div>
                   {lead.website && (
                     <a
-                      href={lead.website}
+                      href={lead.website.startsWith("http") ? lead.website : `https://${lead.website}`}
                       target="_blank"
                       rel="noreferrer"
                       className="p-1 text-slate-400 hover:text-white"
+                      title="Open website"
                     >
                       <ExternalLink className="h-3.5 w-3.5" />
                     </a>
