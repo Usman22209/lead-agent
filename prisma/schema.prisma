@@ -1,0 +1,63 @@
+// Prisma schema for Lead Agent
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Business {
+  id            String    @id @default(cuid())
+  name          String
+  category      String
+  phone         String?
+  email         String?
+  website       String?
+  address       String?
+  city          String
+  rating        Float     @default(0.0)
+  reviewCount   Int       @default(0)
+  googleMapsUrl String?
+  googlePlaceId String?   @unique
+  status        String    @default("NEW") // NEW, QUALIFIED, AUDITED, DEMO_READY, CONTACTED, REPLIED, MEETING, WON, ARCHIVED
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  lead          Lead?
+
+  @@index([city])
+  @@index([category])
+  @@index([status])
+}
+
+model Lead {
+  id                   String    @id @default(cuid())
+  businessId           String    @unique
+  business             Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  score                Int       // 0 to 100
+  priority             String    // A (High), B (Medium), C (Low), D (Disqualified)
+  qualificationReasons String    // JSON string array of reasons
+  hasWebsite           Boolean   @default(false)
+  opportunityType      String    // NO_WEBSITE, OUTDATED_WEBSITE, SEO_OPPORTUNITY, HIGH_POTENTIAL
+  source               String    @default("GOOGLE_MAPS")
+  assignedStatus       String    @default("NEW")
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([priority])
+  @@index([score])
+  @@index([hasWebsite])
+}
+
+model SearchLog {
+  id            String    @id @default(cuid())
+  query         String
+  location      String
+  resultsCount  Int       @default(0)
+  newLeadsCount Int       @default(0)
+  status        String    @default("COMPLETED") // COMPLETED, FAILED, RUNNING
+  createdAt     DateTime  @default(now())
+}
