@@ -16,6 +16,7 @@ import {
   CircleDot,
   CheckCircle2,
   MapPin,
+  Radio,
 } from "lucide-react";
 import { SettingsModal } from "./SettingsModal";
 
@@ -25,6 +26,7 @@ export function Sidebar() {
 
   const navigation = [
     { name: "Dashboard", href: "/", icon: LayoutDashboard },
+    { name: "Auto-Pilot Outbound", href: "/autopilot", icon: Radio, badge: "24/7" },
     { name: "Lead Discovery", href: "/discover", icon: Radar, badge: "Search" },
     { name: "Leads Pipeline", href: "/leads", icon: Users },
   ];

@@ -22,6 +22,7 @@ import {
   Target,
   FileText,
   ListChecks,
+  Send,
 } from "lucide-react";
 import { PriorityBadge } from "./PriorityBadge";
 import { ScoreGauge } from "./ScoreGauge";
@@ -40,15 +41,22 @@ export function LeadDetailModal({
   onStatusChange,
 }: LeadDetailModalProps) {
   const [activeTab, setActiveTab] = useState<"audit" | "outreach" | "scoring">("audit");
+  const [currentStatus, setCurrentStatus] = useState<string>("NEW");
   const [isAuditing, setIsAuditing] = useState(false);
   const [aiAudit, setAiAudit] = useState<any | null>(null);
   const [copiedPitch, setCopiedPitch] = useState<"whatsapp" | "email" | null>(null);
   const [copiedPhone, setCopiedPhone] = useState(false);
-  const [currentStatus, setCurrentStatus] = useState<string>("NEW");
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [targetEmail, setTargetEmail] = useState("");
 
   useEffect(() => {
     if (lead) {
       setCurrentStatus(lead.status || lead.lead?.assignedStatus || "NEW");
+      setTargetEmail(lead.email || "");
+      setEmailSuccess(null);
+      setEmailError(null);
       if (lead.lead?.aiAnalysis) {
         try {
           const parsed = JSON.parse(lead.lead.aiAnalysis);
@@ -104,6 +112,51 @@ export function LeadDetailModal({
       });
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const handleSendEmail = async () => {
+    const to = targetEmail.trim() || lead?.email?.trim();
+    if (!to || !to.includes("@")) {
+      setEmailError("Please provide a valid recipient email address.");
+      return;
+    }
+    if (!aiAudit?.suggestedPitch?.email) return;
+
+    setIsSendingEmail(true);
+    setEmailError(null);
+    setEmailSuccess(null);
+
+    try {
+      const pitchText = aiAudit.suggestedPitch.email;
+      let subject = `Quick question for ${lead.name}`;
+      const subjectMatch = pitchText.match(/^Subject:\s*(.+)$/im);
+      if (subjectMatch) subject = subjectMatch[1].trim();
+
+      const res = await fetch("/api/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to,
+          subject,
+          message: pitchText,
+          leadId: lead.id,
+          businessName: lead.name,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setEmailSuccess(`Email successfully sent to ${to} via Gmail!`);
+        setCurrentStatus("CONTACTED");
+        if (onStatusChange) onStatusChange(lead.id, "CONTACTED");
+      } else {
+        setEmailError(data.error || "Failed to send email. Check your Gmail credentials in .env.");
+      }
+    } catch (e: any) {
+      setEmailError(e.message || "Failed to send email");
+    } finally {
+      setIsSendingEmail(false);
     }
   };
 
@@ -417,30 +470,73 @@ export function LeadDetailModal({
                   </div>
 
                   {/* Email Pitch Card */}
-                  <div className="p-4 rounded-xl bg-slate-900 border border-white/5 space-y-2.5">
-                    <div className="flex items-center justify-between">
+                  <div className="p-4 rounded-xl bg-slate-900 border border-blue-500/20 space-y-3">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
                       <span className="text-xs font-bold text-blue-400 flex items-center gap-1.5">
                         <Mail className="h-3.5 w-3.5" />
                         Cold Email Pitch Template
                       </span>
-                      <button
-                        onClick={() => handleCopyText(aiAudit.suggestedPitch.email, "email")}
-                        className="text-xs font-semibold text-slate-300 hover:text-white flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-800 border border-white/5 transition cursor-pointer"
-                      >
-                        {copiedPitch === "email" ? (
-                          <>
-                            <Check className="h-3.5 w-3.5 text-emerald-400" /> Copied!
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="h-3.5 w-3.5" /> Copy Email
-                          </>
-                        )}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleCopyText(aiAudit.suggestedPitch.email, "email")}
+                          className="text-xs font-semibold text-slate-300 hover:text-white flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-800 border border-white/5 transition cursor-pointer"
+                        >
+                          {copiedPitch === "email" ? (
+                            <>
+                              <Check className="h-3.5 w-3.5 text-emerald-400" /> Copied!
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="h-3.5 w-3.5" /> Copy Email
+                            </>
+                          )}
+                        </button>
+                        <button
+                          onClick={handleSendEmail}
+                          disabled={isSendingEmail}
+                          className="text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 flex items-center gap-1.5 px-3 py-1 rounded-md transition cursor-pointer disabled:opacity-50"
+                        >
+                          {isSendingEmail ? (
+                            <>
+                              <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Sending...
+                            </>
+                          ) : (
+                            <>
+                              <Send className="h-3.5 w-3.5" /> Send via Gmail
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
+
+                    <div className="flex items-center gap-2 pt-1">
+                      <span className="text-[11px] text-slate-400 font-medium whitespace-nowrap">To:</span>
+                      <input
+                        type="email"
+                        value={targetEmail}
+                        onChange={(e) => setTargetEmail(e.target.value)}
+                        placeholder="prospect@business.com"
+                        className="flex-1 px-2.5 py-1 rounded bg-black/40 border border-white/10 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+
                     <p className="text-xs text-slate-200 leading-relaxed font-sans bg-black/30 p-3 rounded-lg border border-white/5 whitespace-pre-line">
                       {aiAudit.suggestedPitch.email}
                     </p>
+
+                    {emailSuccess && (
+                      <div className="p-2.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-400 flex-shrink-0" />
+                        <span>{emailSuccess}</span>
+                      </div>
+                    )}
+
+                    {emailError && (
+                      <div className="p-2.5 rounded bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4 text-rose-400 flex-shrink-0" />
+                        <span>{emailError}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -495,6 +591,16 @@ export function LeadDetailModal({
           </div>
 
           <div className="flex items-center gap-2">
+            <a
+              href={`/api/export?id=${lead.id}&format=html`}
+              target="_blank"
+              rel="noreferrer"
+              className="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-white/10 text-slate-300 hover:text-white font-medium flex items-center gap-1.5 transition cursor-pointer"
+              title="Open printable executive dossier for this lead"
+            >
+              <FileText className="h-3.5 w-3.5 text-indigo-400" />
+              Print Dossier
+            </a>
             <button
               onClick={onClose}
               className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition cursor-pointer"

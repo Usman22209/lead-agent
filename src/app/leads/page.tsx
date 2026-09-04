@@ -30,6 +30,7 @@ import {
   XCircle,
   Zap,
   ArrowRight,
+  FileText,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -152,7 +153,7 @@ function LeadsPipelineContent() {
     }
   };
 
-  const handleExport = (format: "csv" | "json") => {
+  const handleExport = (format: "csv" | "excel" | "json" | "html") => {
     const params = new URLSearchParams();
     if (priority !== "all") params.set("priority", priority);
     if (hasWebsite !== "all") params.set("hasWebsite", hasWebsite);
@@ -181,11 +182,28 @@ function LeadsPipelineContent() {
         actionButton={
           <div className="flex items-center gap-2">
             <button
+              onClick={() => handleExport("excel")}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-500/30 text-emerald-300 text-xs font-semibold transition cursor-pointer"
+              title="Download styled Excel spreadsheet with auto-fitted columns"
+            >
+              <Download className="h-3.5 w-3.5 text-emerald-400" />
+              <span>Export Excel</span>
+            </button>
+            <button
               onClick={() => handleExport("csv")}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-white/10 text-slate-300 text-xs font-semibold transition cursor-pointer"
+              title="Download clean flat CSV"
             >
               <Download className="h-3.5 w-3.5" />
-              <span>Export CSV</span>
+              <span>CSV</span>
+            </button>
+            <button
+              onClick={() => handleExport("html")}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-white/10 text-indigo-300 text-xs font-semibold transition cursor-pointer"
+              title="Open printable executive lead dossier / PDF report"
+            >
+              <FileText className="h-3.5 w-3.5 text-indigo-400" />
+              <span>Lead Document</span>
             </button>
             <Link
               href="/discover"

@@ -1,6 +1,7 @@
 import prisma from "../db";
 import { searchGooglePlaces } from "../collectors/google-maps";
 import { qualifyAndScoreLead } from "../scoring/lead-qualifier";
+import { EmailScraper } from "../collectors/email-scraper";
 import { RawBusinessLead, LeadFilterParams } from "../types";
 
 export interface DiscoveryResult {
@@ -99,6 +100,16 @@ export class LeadService {
           isNew: false,
         });
       } else {
+        // Automatically scrape public email if website exists
+        let discoveredEmail = raw.email || null;
+        if (!discoveredEmail && raw.website) {
+          try {
+            discoveredEmail = await EmailScraper.scrapeEmailFromWebsite(raw.website);
+          } catch {
+            // ignore scraper error
+          }
+        }
+
         // Create new Business + Lead
         newLeadsCount++;
         const createdBusiness = await prisma.business.create({
@@ -106,7 +117,7 @@ export class LeadService {
             name: raw.name,
             category: raw.category || keyword,
             phone: raw.phone || null,
-            email: raw.email || null,
+            email: discoveredEmail,
             website: raw.website || null,
             address: raw.address || null,
             city: raw.city || location,

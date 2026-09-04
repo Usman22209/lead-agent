@@ -196,6 +196,29 @@ export async function callGeminiWithPersistentRetry(
 }
 
 /**
+ * Replaces any accidental model placeholders like [Name], [Business Name], [Owner]
+ * with the actual business name and clean greetings.
+ */
+export function sanitizePitchText(text: string, business: { name: string; city: string }): string {
+  if (!text) return "";
+  let clean = text
+    // Replace greetings with [Name] or [Owner]
+    .replace(/\b(?:Hi|Hey|Hello|Dear)\s+\[(?:Name|Owner|Manager|First\s*Name|Recipient\s*Name|Business\s*Name|Company\s*Name)\]/gi, `Hi ${business.name} team`)
+    // Replace any remaining [Name] / [Business Name]
+    .replace(/\[(?:Business\s*Name|Company\s*Name|Business|Company)\]/gi, business.name)
+    .replace(/\[(?:Owner\s*Name|Owner|Founder|Manager|Name|First\s*Name|Recipient\s*Name)\]/gi, `${business.name} team`)
+    .replace(/\[(?:City|Location)\]/gi, business.city)
+    .replace(/\[(?:Your\s*Name|My\s*Name|Sender\s*Name)\]/gi, "Usman")
+    .replace(/\[(?:Your\s*Company|Agency\s*Name)\]/gi, "our team")
+    .replace(/\[(?:insert\s*)?(?:demo\s*)?(?:link|preview|url)\]/gi, "our demo preview")
+    // Remove any remaining bracketed placeholders
+    .replace(/\[[^\]]{1,40}\]/g, business.name);
+
+  // Clean up double spaces
+  return clean.replace(/[ ]{2,}/g, " ").trim();
+}
+
+/**
  * Deep Lead Analysis & Strategy Pitch using Google Gemini
  */
 export async function runGeminiLeadAnalysis(
@@ -215,6 +238,12 @@ Analyze the following local business profile:
 - Current Website: ${business.website || "NONE (No website detected)"}
 - Google Rating: ${business.rating || 0} stars
 - Google Reviews: ${business.reviewCount || 0} total reviews
+
+IMPORTANT PERSONALIZATION RULES FOR OUTREACH PITCHES:
+1. Address the business directly: start with "Hi ${business.name} team," or "Hi ${business.name},"
+2. NEVER use template bracket placeholders like [Name], [Business Name], [Owner's Name], [Your Name], [Insert Link], or ANY square brackets [...].
+3. The pitch must be completely written out and ready to dispatch immediately.
+4. Sign off naturally as "Usman | Web Specialist" or "Usman".
 
 Provide a strategic analysis formatted STRICTLY in this JSON structure:
 {
@@ -236,8 +265,8 @@ Provide a strategic analysis formatted STRICTLY in this JSON structure:
     "Specific website feature 4"
   ],
   "suggestedPitch": {
-    "whatsapp": "A short, punchy 2-3 sentence personalized WhatsApp message referencing their Google review count and proposing a bespoke website concept.",
-    "email": "A professional 2-paragraph outreach email pitch with clear value proposition and invitation to view a demo."
+    "whatsapp": "A short, punchy 2-3 sentence personalized WhatsApp message starting with 'Hi ${business.name} team,' referencing their ${business.reviewCount || 0} Google reviews and proposing a bespoke website concept. Zero brackets.",
+    "email": "A professional 2-paragraph outreach email pitch starting with 'Hi ${business.name} team,' with clear value proposition and invitation to view a demo. Zero brackets."
   }
 }
 `;
@@ -246,6 +275,17 @@ Provide a strategic analysis formatted STRICTLY in this JSON structure:
     const result = await callGeminiWithPersistentRetry(apiKey, prompt, systemPrompt, 3, true);
     const parsed = JSON.parse(result.text) as GeminiAuditResult;
     parsed.modelUsed = result.modelUsed;
+
+    // Sanitize any remaining accidental brackets from model output
+    if (parsed.suggestedPitch) {
+      if (parsed.suggestedPitch.whatsapp) {
+        parsed.suggestedPitch.whatsapp = sanitizePitchText(parsed.suggestedPitch.whatsapp, business);
+      }
+      if (parsed.suggestedPitch.email) {
+        parsed.suggestedPitch.email = sanitizePitchText(parsed.suggestedPitch.email, business);
+      }
+    }
+
     return parsed;
   } catch (error: any) {
     if (error.message !== "MISSING_KEY") {
@@ -254,6 +294,8 @@ Provide a strategic analysis formatted STRICTLY in this JSON structure:
     return generateFallbackAudit(business);
   }
 }
+
+export const generateGeminiAudit = runGeminiLeadAnalysis;
 
 /**
  * Deterministic fallback audit when no API key is provided

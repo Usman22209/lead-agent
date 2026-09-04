@@ -34,6 +34,7 @@ import {
   ArrowRight,
   TrendingUp,
   Compass,
+  Send,
 } from "lucide-react";
 
 export default function LeadDetailPage({
@@ -52,6 +53,13 @@ export default function LeadDetailPage({
   const [copiedPitch, setCopiedPitch] = useState<"whatsapp" | "email" | null>(null);
   const [copiedPhone, setCopiedPhone] = useState(false);
   const [currentStatus, setCurrentStatus] = useState<string>("NEW");
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
+  const [sendSuccessMessage, setSendSuccessMessage] = useState<string | null>(null);
+  const [sendErrorMessage, setSendErrorMessage] = useState<string | null>(null);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [sendEmailSuccess, setSendEmailSuccess] = useState<string | null>(null);
+  const [sendEmailError, setSendEmailError] = useState<string | null>(null);
+  const [targetEmail, setTargetEmail] = useState<string>("");
 
   const fetchLeadDetails = async () => {
     try {
@@ -61,6 +69,9 @@ export default function LeadDetailPage({
       if (data.success && data.lead) {
         setLead(data.lead);
         setCurrentStatus(data.lead.status || "NEW");
+        if (data.lead.email) {
+          setTargetEmail(data.lead.email);
+        }
 
         if (data.lead.lead?.aiAnalysis) {
           try {
@@ -127,6 +138,81 @@ export default function LeadDetailPage({
     navigator.clipboard.writeText(text);
     setCopiedPitch(type);
     setTimeout(() => setCopiedPitch(null), 2000);
+  };
+
+  const handleDirectSendWhatsApp = async () => {
+    if (!lead?.phone || !aiAudit?.suggestedPitch?.whatsapp) return;
+    setIsSendingWhatsApp(true);
+    setSendSuccessMessage(null);
+    setSendErrorMessage(null);
+
+    try {
+      const res = await fetch("/api/whatsapp/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: lead.phone,
+          text: aiAudit.suggestedPitch.whatsapp,
+          leadId: lead.id,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setSendSuccessMessage(`Message sent directly to ${lead.phone} via your linked WhatsApp!`);
+        setCurrentStatus("CONTACTED");
+      } else {
+        setSendErrorMessage(data.error || "Failed to send WhatsApp message. Make sure your WhatsApp is paired in Auto-Pilot.");
+      }
+    } catch (err: any) {
+      setSendErrorMessage(err.message || "Failed to send message");
+    } finally {
+      setIsSendingWhatsApp(false);
+    }
+  };
+
+  const handleDirectSendEmail = async () => {
+    const to = targetEmail.trim() || lead?.email?.trim();
+    if (!to || !to.includes("@")) {
+      setSendEmailError("Please provide a valid recipient email address.");
+      return;
+    }
+    if (!aiAudit?.suggestedPitch?.email) return;
+
+    setIsSendingEmail(true);
+    setSendEmailSuccess(null);
+    setSendEmailError(null);
+
+    try {
+      const pitchText = aiAudit.suggestedPitch.email;
+      let subject = `Quick question for ${lead.name}`;
+      const subjectMatch = pitchText.match(/^Subject:\s*(.+)$/im);
+      if (subjectMatch) subject = subjectMatch[1].trim();
+
+      const res = await fetch("/api/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to,
+          subject,
+          message: pitchText,
+          leadId: lead.id,
+          businessName: lead.name,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSendEmailSuccess(`Cold email successfully sent to ${to} via your Gmail account!`);
+        setCurrentStatus("CONTACTED");
+      } else {
+        setSendEmailError(data.error || "Failed to send email. Check your Gmail credentials in .env.");
+      }
+    } catch (err: any) {
+      setSendEmailError(err.message || "Failed to send email");
+    } finally {
+      setIsSendingEmail(false);
+    }
   };
 
   if (loading) {
@@ -219,6 +305,17 @@ export default function LeadDetailPage({
               <option value="ARCHIVED">Archived</option>
             </select>
           </div>
+
+          <a
+            href={`/api/export?id=${lead.id}&format=html`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-white/10 text-slate-300 hover:text-white text-xs font-semibold transition"
+            title="Open printable executive dossier for this lead"
+          >
+            <FileText className="h-3.5 w-3.5 text-indigo-400" />
+            <span>Print Dossier</span>
+          </a>
 
           {lead.phone && (
             <a
@@ -505,59 +602,139 @@ export default function LeadDetailPage({
 
                     {/* WhatsApp Pitch */}
                     {aiAudit.suggestedPitch?.whatsapp && (
-                      <div className="p-4 rounded-lg bg-[#080c14] border border-emerald-500/20 space-y-2">
-                        <div className="flex items-center justify-between">
+                      <div className="p-4 rounded-lg bg-[#080c14] border border-emerald-500/20 space-y-3">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
                           <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
                             <MessageSquare className="h-3.5 w-3.5" />
                             WhatsApp Pitch Copy
                           </span>
-                          <button
-                            onClick={() => handleCopyText(aiAudit.suggestedPitch.whatsapp, "whatsapp")}
-                            className="text-xs font-semibold text-slate-300 hover:text-white flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-900 border border-white/10 transition cursor-pointer"
-                          >
-                            {copiedPitch === "whatsapp" ? (
-                              <>
-                                <Check className="h-3.5 w-3.5 text-emerald-400" /> Copied!
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="h-3.5 w-3.5" /> Copy Message
-                              </>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleCopyText(aiAudit.suggestedPitch.whatsapp, "whatsapp")}
+                              className="text-xs font-semibold text-slate-300 hover:text-white flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-900 border border-white/10 transition cursor-pointer"
+                            >
+                              {copiedPitch === "whatsapp" ? (
+                                <>
+                                  <Check className="h-3.5 w-3.5 text-emerald-400" /> Copied!
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="h-3.5 w-3.5" /> Copy Message
+                                </>
+                              )}
+                            </button>
+
+                            {lead.phone && (
+                              <button
+                                onClick={handleDirectSendWhatsApp}
+                                disabled={isSendingWhatsApp}
+                                className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 flex items-center gap-1 px-3 py-1 rounded-md shadow-sm transition disabled:opacity-50 cursor-pointer"
+                              >
+                                {isSendingWhatsApp ? (
+                                  <>
+                                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                                    <span>Sending...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Zap className="h-3.5 w-3.5" />
+                                    <span>Send via Linked WhatsApp</span>
+                                  </>
+                                )}
+                              </button>
                             )}
-                          </button>
+                          </div>
                         </div>
+
                         <p className="text-xs text-slate-200 leading-relaxed font-sans bg-black/40 p-3 rounded-md border border-white/5">
                           {aiAudit.suggestedPitch.whatsapp}
                         </p>
+
+                        {sendSuccessMessage && (
+                          <div className="p-2.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center gap-2">
+                            <CheckCircle2 className="h-4 w-4 text-emerald-400 flex-shrink-0" />
+                            <span>{sendSuccessMessage}</span>
+                          </div>
+                        )}
+
+                        {sendErrorMessage && (
+                          <div className="p-2.5 rounded bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center gap-2">
+                            <AlertCircle className="h-4 w-4 text-rose-400 flex-shrink-0" />
+                            <span>{sendErrorMessage}</span>
+                          </div>
+                        )}
                       </div>
                     )}
 
                     {/* Email Pitch */}
                     {aiAudit.suggestedPitch?.email && (
-                      <div className="p-4 rounded-lg bg-[#080c14] border border-blue-500/20 space-y-2">
-                        <div className="flex items-center justify-between">
+                      <div className="p-4 rounded-lg bg-[#080c14] border border-blue-500/20 space-y-3">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
                           <span className="text-xs font-bold text-blue-400 flex items-center gap-1.5">
                             <Mail className="h-3.5 w-3.5" />
-                            Cold Email Template
+                            Cold Email Pitch Template
                           </span>
-                          <button
-                            onClick={() => handleCopyText(aiAudit.suggestedPitch.email, "email")}
-                            className="text-xs font-semibold text-slate-300 hover:text-white flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-900 border border-white/10 transition cursor-pointer"
-                          >
-                            {copiedPitch === "email" ? (
-                              <>
-                                <Check className="h-3.5 w-3.5 text-emerald-400" /> Copied!
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="h-3.5 w-3.5" /> Copy Email
-                              </>
-                            )}
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleCopyText(aiAudit.suggestedPitch.email, "email")}
+                              className="text-xs font-semibold text-slate-300 hover:text-white flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-900 border border-white/10 transition cursor-pointer"
+                            >
+                              {copiedPitch === "email" ? (
+                                <>
+                                  <Check className="h-3.5 w-3.5 text-emerald-400" /> Copied!
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="h-3.5 w-3.5" /> Copy Email
+                                </>
+                              )}
+                            </button>
+                            <button
+                              onClick={handleDirectSendEmail}
+                              disabled={isSendingEmail}
+                              className="text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 flex items-center gap-1.5 px-3 py-1 rounded-md transition cursor-pointer disabled:opacity-50"
+                            >
+                              {isSendingEmail ? (
+                                <>
+                                  <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Sending...
+                                </>
+                              ) : (
+                                <>
+                                  <Send className="h-3.5 w-3.5" /> Send via Gmail
+                                </>
+                              )}
+                            </button>
+                          </div>
                         </div>
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <span className="text-[11px] text-slate-400 font-medium whitespace-nowrap">To:</span>
+                          <input
+                            type="email"
+                            value={targetEmail}
+                            onChange={(e) => setTargetEmail(e.target.value)}
+                            placeholder="prospect@business.com"
+                            className="flex-1 px-2.5 py-1 rounded bg-black/40 border border-white/10 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
                         <p className="text-xs text-slate-200 leading-relaxed font-sans bg-black/40 p-3 rounded-md border border-white/5 whitespace-pre-line">
                           {aiAudit.suggestedPitch.email}
                         </p>
+
+                        {sendEmailSuccess && (
+                          <div className="p-2.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center gap-2">
+                            <CheckCircle2 className="h-4 w-4 text-emerald-400 flex-shrink-0" />
+                            <span>{sendEmailSuccess}</span>
+                          </div>
+                        )}
+
+                        {sendEmailError && (
+                          <div className="p-2.5 rounded bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center gap-2">
+                            <AlertCircle className="h-4 w-4 text-rose-400 flex-shrink-0" />
+                            <span>{sendEmailError}</span>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

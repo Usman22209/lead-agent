@@ -8,6 +8,7 @@ export type OpportunityType =
   | "STANDARD_IMPROVEMENT";
 
 export interface RawBusinessLead {
+  id?: string;
   name: string;
   category: string;
   phone?: string | null;

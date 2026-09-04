@@ -28,6 +28,10 @@ dist/
 .env.test.local
 .env.production.local
 
+# WhatsApp Session Keys & Credentials
+auth_info_baileys/
+*baileys*
+
 # SQLite Local Databases & Cache
 *.db
 *.db-journal

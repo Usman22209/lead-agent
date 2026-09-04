@@ -42,6 +42,7 @@ model Lead {
   qualificationReasons String    // JSON string array of reasons
   hasWebsite           Boolean   @default(false)
   opportunityType      String    // NO_WEBSITE, OUTDATED_WEBSITE, SEO_OPPORTUNITY, HIGH_POTENTIAL
+  aiAnalysis           String?   // JSON string of Gemini 2.5 Flash audit report
   source               String    @default("GOOGLE_MAPS")
   assignedStatus       String    @default("NEW")
   createdAt            DateTime  @default(now())

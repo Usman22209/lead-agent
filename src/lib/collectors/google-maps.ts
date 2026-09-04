@@ -105,7 +105,7 @@ async function fetchFromGooglePlacesApi(
 
       if (detail) {
         website = detail.website || null;
-        phone = detail.formatted_phone_number || detail.international_phone_number || null;
+        phone = detail.international_phone_number || detail.formatted_phone_number || null;
         if (detail.url) mapsUrl = detail.url;
       }
     } catch {
