@@ -23,13 +23,32 @@ model Business {
   googleMapsUrl String?
   googlePlaceId String?   @unique
   status        String    @default("NEW") // NEW, QUALIFIED, AUDITED, DEMO_READY, CONTACTED, REPLIED, MEETING, WON, ARCHIVED
+  lastContactedAt DateTime?
+  followUpCount   Int       @default(0)
+  nextFollowUpAt  DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   lead          Lead?
+  outreachLogs  OutreachLog[]
 
   @@index([city])
   @@index([category])
+  @@index([status])
+  @@index([nextFollowUpAt])
+}
+
+model OutreachLog {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  channel    String   // "WHATSAPP" | "EMAIL"
+  step       Int      // 0 = Initial, 1 = Bump, 2 = Value, 3 = Breakup
+  message    String
+  sentAt     DateTime @default(now())
+  status     String   // "SENT" | "REPLIED" | "FAILED"
+
+  @@index([businessId])
   @@index([status])
 }
 

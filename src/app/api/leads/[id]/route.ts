@@ -9,7 +9,12 @@ export async function GET(
     const { id } = await params;
     const business = await prisma.business.findUnique({
       where: { id },
-      include: { lead: true },
+      include: {
+        lead: true,
+        outreachLogs: {
+          orderBy: { sentAt: "desc" },
+        },
+      },
     });
 
     if (!business) {

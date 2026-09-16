@@ -316,9 +316,9 @@ export class LeadService {
       leadWhere.priority = priority;
     }
 
-    if (hasWebsite === "no") {
+    if (hasWebsite === "no" || hasWebsite === "false" || (hasWebsite as any) === false) {
       leadWhere.hasWebsite = false;
-    } else if (hasWebsite === "yes") {
+    } else if (hasWebsite === "yes" || hasWebsite === "true" || (hasWebsite as any) === true) {
       leadWhere.hasWebsite = true;
     }
 

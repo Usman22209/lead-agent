@@ -1,7 +1,7 @@
 import cron, { ScheduledTask } from "node-cron";
 import { prisma } from "@/lib/db";
 import { LeadService } from "@/lib/services/lead-service";
-import { generateGeminiAudit, sanitizePitchText } from "@/lib/ai/gemini";
+import { generateGeminiAudit, sanitizePitchText, getFollowUpPitch } from "@/lib/ai/gemini";
 import { whatsAppManager } from "@/lib/outreach/whatsapp-service";
 import { EmailService } from "@/lib/outreach/email-service";
 import { EmailScraper } from "@/lib/collectors/email-scraper";
@@ -22,12 +22,15 @@ export interface AutoPilotConfig {
   startHour: number;
   endHour: number;
   minimumScore: number;
+  enableFollowUps: boolean;
+  followUpIntervalDays: number;
+  maxFollowUps: number;
 }
 
 export interface AutoPilotLog {
   id: string;
   timestamp: string;
-  type: "DISCOVERY" | "AUDIT" | "WHATSAPP_SENT" | "WHATSAPP_ERROR" | "EMAIL_SENT" | "EMAIL_ERROR" | "INFO" | "SKIPPED";
+  type: "DISCOVERY" | "AUDIT" | "WHATSAPP_SENT" | "WHATSAPP_ERROR" | "EMAIL_SENT" | "EMAIL_ERROR" | "FOLLOWUP_SENT" | "FOLLOWUP_ERROR" | "INFO" | "SKIPPED";
   message: string;
   businessName?: string;
   phone?: string;
@@ -38,6 +41,8 @@ export interface AutoPilotState {
   isActive: boolean;
   sentToday: number;
   emailsSentToday: number;
+  followUpsSentToday: number;
+  pendingFollowUpsDue: number;
   dailyLimit: number;
   currentQueueIndex: number;
   targetQueues: TargetCampaignQueue[];
@@ -51,6 +56,7 @@ class AutoPilotEngine {
   private isActive = false;
   private sentToday = 0;
   private emailsSentToday = 0;
+  private followUpsSentToday = 0;
   private lastResetDate = new Date().toDateString();
   private cronJob: ScheduledTask | null = null;
   private currentQueueIndex = 0;
@@ -73,6 +79,9 @@ class AutoPilotEngine {
     startHour: 9,
     endHour: 18,
     minimumScore: 70, // Priority A & B leads
+    enableFollowUps: true,
+    followUpIntervalDays: 2,
+    maxFollowUps: 2,
   };
 
   constructor() {
@@ -80,6 +89,7 @@ class AutoPilotEngine {
     cron.schedule("0 0 * * *", () => {
       this.sentToday = 0;
       this.emailsSentToday = 0;
+      this.followUpsSentToday = 0;
       this.lastResetDate = new Date().toDateString();
       this.addLog("INFO", "Daily dispatch counters reset to 0 for the new day.");
     });
@@ -91,6 +101,8 @@ class AutoPilotEngine {
       isActive: this.isActive,
       sentToday: this.sentToday,
       emailsSentToday: this.emailsSentToday,
+      followUpsSentToday: this.followUpsSentToday,
+      pendingFollowUpsDue: 0,
       dailyLimit: this.config.dailyWhatsAppLimit,
       currentQueueIndex: this.currentQueueIndex,
       targetQueues: this.targetQueues,
@@ -99,6 +111,20 @@ class AutoPilotEngine {
       lastRunAt: this.lastRunAt,
       nextScheduledRun: this.isActive ? "Running active dispatch loop" : "Paused",
     };
+  }
+
+  public async getStateAsync(): Promise<AutoPilotState> {
+    const state = this.getState();
+    try {
+      state.pendingFollowUpsDue = await prisma.business.count({
+        where: {
+          status: "CONTACTED",
+          nextFollowUpAt: { lte: new Date() },
+          followUpCount: { lt: this.config.maxFollowUps },
+        },
+      });
+    } catch {}
+    return state;
   }
 
   public updateConfig(newConfig: Partial<AutoPilotConfig>, newQueues?: TargetCampaignQueue[]) {
@@ -153,7 +179,161 @@ class AutoPilotEngine {
       }
     }
 
-    // 3. Get Active Target Queue
+    // ══════════════════════════════════════════════════════════════════════
+    // 3. PRIORITY PHASE 1: DISPATCH DUE FOLLOW-UPS (HIGHEST CONVERSION ROI)
+    // ══════════════════════════════════════════════════════════════════════
+    if (this.config.enableFollowUps) {
+      try {
+        const now = new Date();
+        const dueFollowUps = await prisma.business.findMany({
+          where: {
+            status: "CONTACTED",
+            nextFollowUpAt: { lte: now },
+            followUpCount: { lt: this.config.maxFollowUps },
+          },
+          include: { lead: true },
+          take: 5,
+        });
+
+        if (dueFollowUps.length > 0) {
+          this.addLog("INFO", `Found ${dueFollowUps.length} follow-up(s) due for outreach sequence. Processing...`);
+
+          for (const biz of dueFollowUps) {
+            if (!this.isActive) break;
+            if (this.sentToday >= this.config.dailyWhatsAppLimit) break;
+
+            const waState = whatsAppManager.getState();
+            const isWaReady = waState.status === "CONNECTED";
+            const nextStep = (biz.followUpCount ?? 0) + 1;
+
+            let auditData: any = null;
+            try {
+              if (biz.lead?.aiAnalysis) {
+                auditData = JSON.parse(biz.lead.aiAnalysis);
+              }
+            } catch {}
+
+            // Determine channel: Prioritize WhatsApp if connected and phone exists, else Email
+            let channel: "WHATSAPP" | "EMAIL" | null = null;
+            if (isWaReady && biz.phone) {
+              channel = "WHATSAPP";
+            } else if (this.config.enableEmail && biz.email) {
+              channel = "EMAIL";
+            }
+
+            if (!channel) {
+              // Both unavailable right now, postpone by 1 day
+              await prisma.business.update({
+                where: { id: biz.id },
+                data: { nextFollowUpAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
+              }).catch(() => null);
+              continue;
+            }
+
+            const pitch = getFollowUpPitch(auditData, biz, channel, nextStep);
+            let dispatched = false;
+
+            if (channel === "WHATSAPP" && biz.phone) {
+              const sendRes = await whatsAppManager.sendMessage(biz.phone, pitch, biz.city);
+              if (sendRes.success) {
+                dispatched = true;
+                this.sentToday++;
+                this.followUpsSentToday++;
+                this.addLog(
+                  "FOLLOWUP_SENT",
+                  `✅ Sent Follow-up #${nextStep} via WhatsApp to "${biz.name}" (${biz.phone})!`,
+                  biz.name,
+                  biz.phone,
+                  biz.lead?.score
+                );
+              } else {
+                this.addLog(
+                  "FOLLOWUP_ERROR",
+                  `WhatsApp follow-up failed for "${biz.name}": ${sendRes.error}`,
+                  biz.name,
+                  biz.phone
+                );
+              }
+            } else if (channel === "EMAIL" && biz.email) {
+              try {
+                const { subject, body } = EmailService.parseEmailPitch(pitch, biz.name);
+                const emailRes = await EmailService.sendLeadEmail({
+                  to: biz.email,
+                  subject,
+                  body,
+                  leadId: biz.id,
+                  businessName: biz.name,
+                });
+                if (emailRes.success) {
+                  dispatched = true;
+                  this.emailsSentToday++;
+                  this.followUpsSentToday++;
+                  this.addLog(
+                    "FOLLOWUP_SENT",
+                    `📧 Sent Follow-up #${nextStep} via Email to "${biz.name}" (${biz.email})!`,
+                    biz.name,
+                    undefined,
+                    biz.lead?.score
+                  );
+                } else {
+                  this.addLog(
+                    "FOLLOWUP_ERROR",
+                    `Email follow-up failed for "${biz.name}": ${emailRes.error}`,
+                    biz.name
+                  );
+                }
+              } catch (err: any) {
+                this.addLog(
+                  "FOLLOWUP_ERROR",
+                  `Email follow-up error for "${biz.name}": ${err.message}`,
+                  biz.name
+                );
+              }
+            }
+
+            if (dispatched) {
+              const nextFollowUpAt =
+                nextStep < this.config.maxFollowUps
+                  ? new Date(Date.now() + this.config.followUpIntervalDays * 24 * 60 * 60 * 1000)
+                  : null; // Final touch reached
+
+              await prisma.business.update({
+                where: { id: biz.id },
+                data: {
+                  lastContactedAt: new Date(),
+                  followUpCount: nextStep,
+                  nextFollowUpAt,
+                },
+              });
+
+              await (prisma as any).outreachLog.create({
+                data: {
+                  businessId: biz.id,
+                  channel,
+                  step: nextStep,
+                  message: pitch,
+                  status: "SENT",
+                },
+              }).catch(() => null);
+
+              // Jitter delay between follow-ups
+              const delaySec = Math.floor(
+                Math.random() * (this.config.maxDelaySeconds - this.config.minDelaySeconds + 1) +
+                  this.config.minDelaySeconds
+              );
+              this.addLog("INFO", `Follow-up pacing delay: waiting ${delaySec}s before next action...`);
+              await new Promise((res) => setTimeout(res, delaySec * 1000));
+            }
+          }
+        }
+      } catch (fErr: any) {
+        this.addLog("INFO", `Follow-up check notice: ${fErr.message}`);
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // 4. PHASE 2: NEW LEAD DISCOVERY & INITIAL OUTREACH
+    // ══════════════════════════════════════════════════════════════════════
     const activeQueues = this.targetQueues.filter((q) => q.enabled);
     if (activeQueues.length === 0) {
       this.addLog("INFO", "No active target search queues configured. Add a search target to proceed.");
@@ -167,14 +347,14 @@ class AutoPilotEngine {
     this.addLog("DISCOVERY", `Searching market for "${currentTarget.keyword}" in "${currentTarget.location}"...`);
 
     try {
-      // 4. Run Lead Discovery & Qualification
+      // 5. Run Lead Discovery & Qualification
       const result = await LeadService.discoverAndIngest(currentTarget.keyword, currentTarget.location, 15);
       this.addLog(
         "DISCOVERY",
         `Discovery finished: ${result.totalFound} found (${result.newLeadsCreated} new, ${result.duplicatesSkipped} updated).`
       );
 
-      // 5. Query candidate leads from database ready for outreach (either phone or email)
+      // 6. Query candidate leads from database ready for outreach (either phone or email)
       const candidateLeads = await prisma.business.findMany({
         where: {
           city: currentTarget.location,
@@ -198,7 +378,7 @@ class AutoPilotEngine {
 
       this.addLog("INFO", `Found ${candidateLeads.length} high-priority prospects ready for AI audit & outreach.`);
 
-      // 6. Iterate through candidate leads with human pacing
+      // 7. Iterate through candidate leads with human pacing
       for (const biz of candidateLeads) {
         if (!this.isActive) break;
 
@@ -253,10 +433,29 @@ class AutoPilotEngine {
 
           if (sendRes.success) {
             this.sentToday++;
+            const nextFollowUpDate = this.config.enableFollowUps
+              ? new Date(Date.now() + this.config.followUpIntervalDays * 24 * 60 * 60 * 1000)
+              : null;
+
             await prisma.business.update({
               where: { id: biz.id },
-              data: { status: "CONTACTED" },
+              data: {
+                status: "CONTACTED",
+                lastContactedAt: new Date(),
+                followUpCount: 0,
+                nextFollowUpAt: nextFollowUpDate,
+              },
             });
+
+            await (prisma as any).outreachLog.create({
+              data: {
+                businessId: biz.id,
+                channel: "WHATSAPP",
+                step: 0,
+                message: pitchText,
+                status: "SENT",
+              },
+            }).catch(() => null);
 
             this.addLog(
               "WHATSAPP_SENT",
@@ -324,9 +523,28 @@ class AutoPilotEngine {
 
             if (emailRes.success) {
               this.emailsSentToday++;
+              const nextFollowUpDate = this.config.enableFollowUps
+                ? new Date(Date.now() + this.config.followUpIntervalDays * 24 * 60 * 60 * 1000)
+                : null;
+
               await prisma.business.update({
                 where: { id: biz.id },
-                data: { status: "CONTACTED" },
+                data: {
+                  status: "CONTACTED",
+                  lastContactedAt: new Date(),
+                  followUpCount: 0,
+                  nextFollowUpAt: nextFollowUpDate,
+                },
+              }).catch(() => null);
+
+              await (prisma as any).outreachLog.create({
+                data: {
+                  businessId: biz.id,
+                  channel: "EMAIL",
+                  step: 0,
+                  message: `Subject: ${subject}\n\n${body}`,
+                  status: "SENT",
+                },
               }).catch(() => null);
 
               this.addLog(

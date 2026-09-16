@@ -3,7 +3,7 @@ import { autoPilotEngine } from "@/lib/workers/autopilot-engine";
 
 export async function GET() {
   try {
-    const state = autoPilotEngine.getState();
+    const state = await autoPilotEngine.getStateAsync();
     return NextResponse.json({ success: true, data: state });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

@@ -43,6 +43,9 @@ export default function AutoPilotPage() {
   const [minScore, setMinScore] = useState(70);
   const [workHoursOnly, setWorkHoursOnly] = useState(false);
   const [enableEmail, setEnableEmail] = useState(true);
+  const [enableFollowUps, setEnableFollowUps] = useState(true);
+  const [followUpIntervalDays, setFollowUpIntervalDays] = useState(2);
+  const [maxFollowUps, setMaxFollowUps] = useState(2);
 
   // New Queue Form State
   const [newKeyword, setNewKeyword] = useState("");
@@ -69,6 +72,9 @@ export default function AutoPilotPage() {
           setMinScore(autoData.data.config.minimumScore || 70);
           setWorkHoursOnly(autoData.data.config.workHoursOnly || false);
           setEnableEmail(autoData.data.config.enableEmail !== false);
+          setEnableFollowUps(autoData.data.config.enableFollowUps !== false);
+          setFollowUpIntervalDays(autoData.data.config.followUpIntervalDays || 2);
+          setMaxFollowUps(autoData.data.config.maxFollowUps || 2);
         }
       }
 
@@ -148,6 +154,9 @@ export default function AutoPilotPage() {
             minimumScore: Number(minScore),
             workHoursOnly,
             enableEmail,
+            enableFollowUps,
+            followUpIntervalDays: Number(followUpIntervalDays),
+            maxFollowUps: Number(maxFollowUps),
           },
           queues: engineState?.targetQueues,
         }),
@@ -347,10 +356,18 @@ export default function AutoPilotPage() {
                 <span>{sentCount} <span className="text-[11px] text-emerald-400 font-sans">WA</span></span>
                 <span className="text-slate-600">•</span>
                 <span>{engineState?.emailsSentToday || 0} <span className="text-[11px] text-blue-400 font-sans">Emails</span></span>
+                <span className="text-slate-600">•</span>
+                <span>{engineState?.followUpsSentToday || 0} <span className="text-[11px] text-amber-400 font-sans">Follow-ups</span></span>
               </div>
               <div className="w-full bg-slate-900 rounded-full h-1.5 mt-2 overflow-hidden border border-white/5">
                 <div className="bg-emerald-500 h-full rounded-full transition-all" style={{ width: `${progressPercent}%` }} />
               </div>
+              {engineState?.pendingFollowUpsDue > 0 && (
+                <div className="mt-2 inline-flex items-center gap-1.5 text-[10px] font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
+                  <Clock className="h-3 w-3" />
+                  <span>{engineState.pendingFollowUpsDue} Follow-up{engineState.pendingFollowUpsDue > 1 ? "s" : ""} Due</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -594,6 +611,110 @@ export default function AutoPilotPage() {
                   className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition shadow-sm cursor-pointer"
                 >
                   Save Pacing Configuration
+                </button>
+              </div>
+            </div>
+
+            {/* Multi-Touch Automated Follow-Up Engine Card */}
+            <div className="p-5 rounded-xl bg-[#0d1322] border border-amber-500/20 space-y-4 shadow-lg">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <TrendingUp className="h-4 w-4 text-amber-400" />
+                    Multi-Touch Follow-Up Engine
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Automated sequence across WhatsApp & Gmail (+300% reply rate)</p>
+                </div>
+                {engineState?.pendingFollowUpsDue > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[10px] font-bold">
+                    {engineState.pendingFollowUpsDue} Due
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-4 text-xs">
+                {/* Master Toggle */}
+                <div className="flex items-center justify-between p-3 rounded-lg bg-[#080c14] border border-white/5">
+                  <div className="space-y-0.5">
+                    <span className="text-white text-xs font-semibold flex items-center gap-1.5">
+                      <Zap className="h-3.5 w-3.5 text-amber-400" />
+                      Enable Auto Follow-Ups
+                    </span>
+                    <p className="text-[10px] text-slate-400">
+                      Paced follow-ups sent only if no reply is received
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={enableFollowUps}
+                    onChange={(e) => setEnableFollowUps(e.target.checked)}
+                    className="h-4 w-4 accent-amber-500 cursor-pointer"
+                  />
+                </div>
+
+                {/* Cadence Interval */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-slate-400">
+                    <span>Days Between Follow-Ups:</span>
+                    <span className="font-mono font-bold text-white">{followUpIntervalDays} {followUpIntervalDays === 1 ? "day" : "days"} ({followUpIntervalDays * 24}h)</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={7}
+                    value={followUpIntervalDays}
+                    onChange={(e) => setFollowUpIntervalDays(Number(e.target.value))}
+                    className="w-full accent-amber-500 cursor-pointer"
+                    disabled={!enableFollowUps}
+                  />
+                  <span className="text-[10px] text-slate-500">Recommended: 2 days (48h) for optimal B2B engagement</span>
+                </div>
+
+                {/* Max Follow-ups */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-slate-400">
+                    <span>Max Sequence Touches:</span>
+                    <span className="font-mono font-bold text-white">Up to {maxFollowUps} follow-ups ({maxFollowUps + 1} total touches)</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[1, 2, 3].map((num) => (
+                      <button
+                        key={num}
+                        type="button"
+                        onClick={() => setMaxFollowUps(num)}
+                        disabled={!enableFollowUps}
+                        className={`py-1.5 rounded-lg border text-xs font-semibold transition cursor-pointer ${
+                          maxFollowUps === num
+                            ? "bg-amber-500/20 border-amber-500 text-amber-300 font-bold"
+                            : "bg-[#080c14] border-white/10 text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        {num} {num === 1 ? "Touch" : "Touches"}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="text-[10px] text-slate-500 flex flex-col gap-0.5 pt-0.5">
+                    <span>• Touch 1: Value bump & soft check-in</span>
+                    <span>• Touch 2: Social proof & feature win</span>
+                    {maxFollowUps >= 3 && <span>• Touch 3: Courteous breakup message</span>}
+                  </div>
+                </div>
+
+                {/* Anti-Spam Halt Guarantee Alert */}
+                <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px] leading-relaxed flex items-start gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Instant Halt Rule Active:</strong> The millisecond a lead replies via WhatsApp or email, their status becomes <em>MEETING/REPLIED</em> and all future automated follow-ups immediately freeze.
+                  </span>
+                </div>
+
+                {/* Save Follow-Up Settings */}
+                <button
+                  onClick={handleSaveConfig}
+                  disabled={actionLoading}
+                  className="w-full py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition shadow-sm cursor-pointer"
+                >
+                  Save Follow-Up Cadence
                 </button>
               </div>
             </div>

@@ -51,6 +51,17 @@ export interface BusinessWithLead {
   googleMapsUrl: string | null;
   googlePlaceId: string | null;
   status: string;
+  lastContactedAt?: Date | string | null;
+  followUpCount?: number;
+  nextFollowUpAt?: Date | string | null;
+  outreachLogs?: {
+    id: string;
+    channel: string;
+    step: number;
+    message: string;
+    sentAt: Date | string;
+    status: string;
+  }[];
   createdAt: Date;
   updatedAt: Date;
   lead?: {

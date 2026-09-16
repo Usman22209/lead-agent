@@ -23,6 +23,9 @@ import {
   FileText,
   ListChecks,
   Send,
+  Clock,
+  TrendingUp,
+  History,
 } from "lucide-react";
 import { PriorityBadge } from "./PriorityBadge";
 import { ScoreGauge } from "./ScoreGauge";
@@ -51,12 +54,78 @@ export function LeadDetailModal({
   const [emailError, setEmailError] = useState<string | null>(null);
   const [targetEmail, setTargetEmail] = useState("");
 
+  // Follow-up state
+  const [followUpData, setFollowUpData] = useState<any>(null);
+  const [followUpLoading, setFollowUpLoading] = useState(false);
+  const [followUpSuccess, setFollowUpSuccess] = useState<string | null>(null);
+  const [followUpError, setFollowUpError] = useState<string | null>(null);
+
+  const fetchFollowUpData = async (leadId: string) => {
+    try {
+      const res = await fetch(`/api/leads/${leadId}/followup`);
+      const json = await res.json();
+      if (json.success) {
+        setFollowUpData(json.data);
+      }
+    } catch (err) {
+      console.warn("Failed to fetch follow-up data:", err);
+    }
+  };
+
+  const handleSendFollowUp = async (channel: "WHATSAPP" | "EMAIL") => {
+    if (!lead?.id) return;
+    setFollowUpLoading(true);
+    setFollowUpSuccess(null);
+    setFollowUpError(null);
+
+    try {
+      const res = await fetch(`/api/leads/${lead.id}/followup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setFollowUpSuccess(data.message);
+        fetchFollowUpData(lead.id);
+        setCurrentStatus("CONTACTED");
+        if (onStatusChange) onStatusChange(lead.id, "CONTACTED");
+      } else {
+        setFollowUpError(data.error || "Failed to dispatch follow-up");
+      }
+    } catch (err: any) {
+      setFollowUpError(err.message || "Failed to dispatch follow-up");
+    } finally {
+      setFollowUpLoading(false);
+    }
+  };
+
+  const handlePauseFollowUps = async () => {
+    if (!lead?.id) return;
+    setFollowUpLoading(true);
+    setFollowUpSuccess(null);
+    try {
+      const res = await fetch(`/api/leads/${lead.id}/followup`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.success) {
+        setFollowUpSuccess("Automated follow-ups paused for this lead.");
+        fetchFollowUpData(lead.id);
+      }
+    } catch {} finally {
+      setFollowUpLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (lead) {
       setCurrentStatus(lead.status || lead.lead?.assignedStatus || "NEW");
       setTargetEmail(lead.email || "");
       setEmailSuccess(null);
       setEmailError(null);
+      setFollowUpSuccess(null);
+      setFollowUpError(null);
+      fetchFollowUpData(lead.id);
       if (lead.lead?.aiAnalysis) {
         try {
           const parsed = JSON.parse(lead.lead.aiAnalysis);
@@ -535,6 +604,163 @@ export function LeadDetailModal({
                       <div className="p-2.5 rounded bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center gap-2">
                         <AlertCircle className="h-4 w-4 text-rose-400 flex-shrink-0" />
                         <span>{emailError}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Multi-Touch Follow-Up Engine Card */}
+                  <div className="p-4 rounded-xl bg-slate-900 border border-amber-500/20 space-y-3.5 shadow-md">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div>
+                        <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                          <TrendingUp className="h-3.5 w-3.5" />
+                          Automated Follow-Up Sequence
+                        </span>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Intelligent multi-touch cadences with zero spam & auto-halt on replies
+                        </p>
+                      </div>
+
+                      {followUpData?.nextFollowUpAt && (
+                        <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          Next Due: {new Date(followUpData.nextFollowUpAt).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Step Progression Timeline */}
+                    <div className="grid grid-cols-4 gap-2 pt-1">
+                      {[
+                        { step: 0, title: "Initial Pitch", subtitle: "Day 0" },
+                        { step: 1, title: "Value Bump", subtitle: "+48h" },
+                        { step: 2, title: "Social Proof", subtitle: "+72h" },
+                        { step: 3, title: "Breakup", subtitle: "+96h" },
+                      ].map((item) => {
+                        const currentCount = followUpData?.followUpCount ?? 0;
+                        const isDone = currentCount >= item.step && (currentStatus === "CONTACTED" || currentStatus === "MEETING" || currentStatus === "WON");
+                        const isCurrent = currentCount === item.step - 1 && currentStatus === "CONTACTED";
+
+                        return (
+                          <div
+                            key={item.step}
+                            className={`p-2.5 rounded-lg border text-center transition ${
+                              isDone
+                                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                                : isCurrent
+                                ? "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                                : "bg-black/30 border-white/5 text-slate-500"
+                            }`}
+                          >
+                            <div className="text-[10px] font-bold uppercase tracking-wider">
+                              {isDone ? "✓ Sent" : isCurrent ? "⚡ Next Up" : `Step ${item.step}`}
+                            </div>
+                            <div className="text-xs font-semibold mt-0.5 text-white">{item.title}</div>
+                            <div className="text-[10px] opacity-70">{item.subtitle}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Follow-up Preview if Next Step exists */}
+                    {followUpData?.preview && (
+                      <div className="p-3 rounded-lg bg-black/40 border border-white/5 space-y-2">
+                        <div className="flex items-center justify-between text-[11px] text-slate-400">
+                          <span className="font-semibold text-slate-300">
+                            Upcoming Pitch Copy (Follow-Up #{followUpData.nextStep}):
+                          </span>
+                          <span className="text-[10px] text-slate-500">Auto-tailored by Gemini</span>
+                        </div>
+                        <p className="text-xs text-slate-200 leading-relaxed font-sans bg-black/30 p-2.5 rounded border border-white/5 whitespace-pre-line">
+                          {lead.phone ? followUpData.preview.whatsapp : followUpData.preview.email}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Manual 1-Click Dispatch Controls */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-white/5">
+                      <div className="flex items-center gap-2">
+                        {lead.phone && (
+                          <button
+                            onClick={() => handleSendFollowUp("WHATSAPP")}
+                            disabled={followUpLoading || ["REPLIED", "MEETING", "WON"].includes(currentStatus)}
+                            className="text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition cursor-pointer disabled:opacity-40"
+                          >
+                            <MessageSquare className="h-3.5 w-3.5" />
+                            <span>Send Follow-Up #{followUpData?.nextStep || 1} via WhatsApp</span>
+                          </button>
+                        )}
+                        {(lead.email || targetEmail) && (
+                          <button
+                            onClick={() => handleSendFollowUp("EMAIL")}
+                            disabled={followUpLoading || ["REPLIED", "MEETING", "WON"].includes(currentStatus)}
+                            className="text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition cursor-pointer disabled:opacity-40"
+                          >
+                            <Mail className="h-3.5 w-3.5" />
+                            <span>Send via Gmail</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {followUpData?.nextFollowUpAt && (
+                        <button
+                          onClick={handlePauseFollowUps}
+                          disabled={followUpLoading}
+                          className="text-xs text-slate-400 hover:text-rose-400 transition cursor-pointer"
+                        >
+                          Pause Follow-Ups
+                        </button>
+                      )}
+                    </div>
+
+                    {followUpSuccess && (
+                      <div className="p-2.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-400 flex-shrink-0" />
+                        <span>{followUpSuccess}</span>
+                      </div>
+                    )}
+
+                    {followUpError && (
+                      <div className="p-2.5 rounded bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4 text-rose-400 flex-shrink-0" />
+                        <span>{followUpError}</span>
+                      </div>
+                    )}
+
+                    {/* Outreach History Timeline */}
+                    {followUpData?.outreachLogs && followUpData.outreachLogs.length > 0 && (
+                      <div className="space-y-2 pt-2 border-t border-white/5">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                          <History className="h-3 w-3" />
+                          Outreach Touchpoint History ({followUpData.outreachLogs.length})
+                        </span>
+                        <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                          {followUpData.outreachLogs.map((log: any) => (
+                            <div
+                              key={log.id}
+                              className="p-2 rounded bg-black/40 border border-white/5 text-[11px] space-y-1"
+                            >
+                              <div className="flex items-center justify-between text-slate-400">
+                                <span className="font-semibold text-white flex items-center gap-1.5">
+                                  {log.channel === "WHATSAPP" ? (
+                                    <MessageSquare className="h-3 w-3 text-emerald-400" />
+                                  ) : (
+                                    <Mail className="h-3 w-3 text-blue-400" />
+                                  )}
+                                  {log.status === "REPLIED"
+                                    ? "Inbound Reply Received"
+                                    : log.step === 0
+                                    ? "Initial Outreach Pitch"
+                                    : `Follow-Up #${log.step}`}
+                                </span>
+                                <span className="font-mono text-[10px]">
+                                  {new Date(log.sentAt).toLocaleString()}
+                                </span>
+                              </div>
+                              <p className="text-slate-300 line-clamp-2 italic">{log.message}</p>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>

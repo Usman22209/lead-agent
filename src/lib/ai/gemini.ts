@@ -8,6 +8,12 @@ export interface GeminiAuditResult {
   suggestedPitch: {
     whatsapp: string;
     email: string;
+    whatsappFollowUp1?: string;
+    whatsappFollowUp2?: string;
+    whatsappBreakup?: string;
+    emailFollowUp1?: string;
+    emailFollowUp2?: string;
+    emailBreakup?: string;
   };
   modelUsed?: string;
 }
@@ -266,7 +272,13 @@ Provide a strategic analysis formatted STRICTLY in this JSON structure:
   ],
   "suggestedPitch": {
     "whatsapp": "A short, punchy 2-3 sentence personalized WhatsApp message starting with 'Hi ${business.name} team,' referencing their ${business.reviewCount || 0} Google reviews and proposing a bespoke website concept. Zero brackets.",
-    "email": "A professional 2-paragraph outreach email pitch starting with 'Hi ${business.name} team,' with clear value proposition and invitation to view a demo. Zero brackets."
+    "whatsappFollowUp1": "A casual 2-sentence check-in follow-up starting with 'Hi ${business.name} team,' politely asking if they had a moment to check the concept.",
+    "whatsappFollowUp2": "A specific value-add follow-up proposing a direct WhatsApp booking or reviews showcase for ${business.name}.",
+    "whatsappBreakup": "A polite final breakup message letting ${business.name} know you will close their file and won't flood their inbox.",
+    "email": "A professional 2-paragraph outreach email pitch starting with 'Hi ${business.name} team,' with clear value proposition and invitation to view a demo. Zero brackets.",
+    "emailFollowUp1": "A brief threaded follow-up email with 'Subject: Re: Quick concept for ${business.name}' checking in politely.",
+    "emailFollowUp2": "A value-focused follow-up email highlighting a competitor gap or customer booking win for ${business.name}.",
+    "emailBreakup": "A polite closing-the-loop breakup email with 'Subject: Closing the loop for ${business.name}'."
   }
 }
 `;
@@ -278,12 +290,15 @@ Provide a strategic analysis formatted STRICTLY in this JSON structure:
 
     // Sanitize any remaining accidental brackets from model output
     if (parsed.suggestedPitch) {
-      if (parsed.suggestedPitch.whatsapp) {
-        parsed.suggestedPitch.whatsapp = sanitizePitchText(parsed.suggestedPitch.whatsapp, business);
-      }
-      if (parsed.suggestedPitch.email) {
-        parsed.suggestedPitch.email = sanitizePitchText(parsed.suggestedPitch.email, business);
-      }
+      const sp = parsed.suggestedPitch;
+      if (sp.whatsapp) sp.whatsapp = sanitizePitchText(sp.whatsapp, business);
+      if (sp.whatsappFollowUp1) sp.whatsappFollowUp1 = sanitizePitchText(sp.whatsappFollowUp1, business);
+      if (sp.whatsappFollowUp2) sp.whatsappFollowUp2 = sanitizePitchText(sp.whatsappFollowUp2, business);
+      if (sp.whatsappBreakup) sp.whatsappBreakup = sanitizePitchText(sp.whatsappBreakup, business);
+      if (sp.email) sp.email = sanitizePitchText(sp.email, business);
+      if (sp.emailFollowUp1) sp.emailFollowUp1 = sanitizePitchText(sp.emailFollowUp1, business);
+      if (sp.emailFollowUp2) sp.emailFollowUp2 = sanitizePitchText(sp.emailFollowUp2, business);
+      if (sp.emailBreakup) sp.emailBreakup = sanitizePitchText(sp.emailBreakup, business);
     }
 
     return parsed;
@@ -326,7 +341,13 @@ function generateFallbackAudit(business: RawBusinessLead): GeminiAuditResult {
       ],
       suggestedPitch: {
         whatsapp: `Hi ${business.name}! We noticed your strong Google profile in ${business.city} with ${reviews} reviews (${rating}★). We created a custom website concept specifically for your business to help capture more appointments online. Would love to share the preview with you!`,
-        email: `Hi Team ${business.name},\n\nI was looking at top-rated ${business.category} businesses in ${business.city} and came across your impressive Google profile (${reviews} reviews, ${rating} stars).\n\nWe noticed there isn't currently a dedicated website where clients can explore your full service offerings and book directly. Our team created a personalized demo concept showing how a modern web presence could streamline new inquiries for ${business.name}.\n\nWould you be open to a quick 5-minute walkthrough of the concept?`,
+        whatsappFollowUp1: `Hi ${business.name} team! Just following up on my note earlier regarding the custom website preview we built for you. Did you have a moment to take a look?`,
+        whatsappFollowUp2: `Hey ${business.name} team, quick thought — adding direct WhatsApp appointment booking to your Google profile could easily drive 25-30% more client inquiries each month. Happy to share a quick 2-min preview if you'd like!`,
+        whatsappBreakup: `Hi ${business.name} team, I assume you're focused on other priorities right now, so I won't flood your inbox. Feel free to reach out anytime if you'd ever like to expand your online presence!`,
+        email: `Subject: Custom website concept for ${business.name}\n\nHi Team ${business.name},\n\nI was looking at top-rated ${business.category} businesses in ${business.city} and came across your impressive Google profile (${reviews} reviews, ${rating} stars).\n\nWe noticed there isn't currently a dedicated website where clients can explore your full service offerings and book directly. Our team created a personalized demo concept showing how a modern web presence could streamline new inquiries for ${business.name}.\n\nWould you be open to a quick 5-minute walkthrough of the concept?`,
+        emailFollowUp1: `Subject: Re: Custom website concept for ${business.name}\n\nHi Team ${business.name},\n\nJust wanted to quickly follow up on my previous note. We put together a complimentary concept for ${business.name} to help convert more local Google searchers into booked clients.\n\nLet me know if you have 5 minutes this week to take a look!`,
+        emailFollowUp2: `Subject: Quick idea for ${business.name}\n\nHi Team ${business.name},\n\nI was looking at similar ${business.category} businesses in ${business.city} and noticed that adding instant mobile booking and verified review badges increased their client inquiries significantly.\n\nWould you be open to seeing a 2-minute walkthrough of how we could implement this for ${business.name}?`,
+        emailBreakup: `Subject: Closing the loop for ${business.name}\n\nHi Team ${business.name},\n\nI haven't heard back, so I assume this isn't a priority for ${business.name} right now — totally understand!\n\nI'll close our file here and won't follow up again. If priorities ever shift, feel free to reach back out anytime.`,
       },
       modelUsed: "heuristic-engine",
     };
@@ -350,8 +371,38 @@ function generateFallbackAudit(business: RawBusinessLead): GeminiAuditResult {
     ],
     suggestedPitch: {
       whatsapp: `Hi ${business.name}! We reviewed your online presence and found 4 quick opportunities to increase booking conversions from mobile visitors. We'd love to share our audit!`,
-      email: `Hi Team ${business.name},\n\nWe recently conducted a complimentary digital presence audit for top ${business.category} businesses in ${business.city}.\n\nWhile your business has strong reputation metrics, we identified several conversion opportunities on your current site that could significantly increase inbound inquiries. Would you be open to reviewing the audit findings?`,
+      whatsappFollowUp1: `Hi ${business.name} team! Just following up on the quick mobile conversion audit we prepared for ${business.name}. Let me know if you'd like me to send over the summary!`,
+      whatsappFollowUp2: `Hey ${business.name} team, quick tip: implementing an instant WhatsApp booking bar on your site could capture visitors who bounce before calling. Happy to show you an example!`,
+      whatsappBreakup: `Hi ${business.name} team, completely understand if you're busy right now. I'll pause follow-ups here. Wishing your team continued success!`,
+      email: `Subject: 4 conversion opportunities for ${business.name}\n\nHi Team ${business.name},\n\nWe recently conducted a complimentary digital presence audit for top ${business.category} businesses in ${business.city}.\n\nWhile your business has strong reputation metrics, we identified several conversion opportunities on your current site that could significantly increase inbound inquiries. Would you be open to reviewing the audit findings?`,
+      emailFollowUp1: `Subject: Re: 4 conversion opportunities for ${business.name}\n\nHi Team ${business.name},\n\nJust floating this to the top of your inbox. Did you get a chance to see the conversion notes for ${business.name}'s website?\n\nHappy to share the highlights whenever convenient!`,
+      emailFollowUp2: `Subject: Quick win for ${business.name}\n\nHi Team ${business.name},\n\nOne of the biggest quick wins we saw was streamlining the mobile booking flow for ${business.city} customers. Would you be interested in a 2-minute screen recording showing how to fix this?`,
+      emailBreakup: `Subject: Closing the loop for ${business.name}\n\nHi Team ${business.name},\n\nI haven't heard back, so I assume this is not a priority right now. I will close our file here and won't reach out again. Best of luck with ${business.name}!`,
     },
     modelUsed: "heuristic-engine",
   };
+}
+
+/**
+ * Returns the appropriate pitch text for a given channel and outreach step (0 = Initial, 1 = Bump, 2 = Value, 3 = Breakup)
+ */
+export function getFollowUpPitch(
+  audit: GeminiAuditResult | null,
+  business: { name: string; city: string; category?: string },
+  channel: "WHATSAPP" | "EMAIL",
+  step: number
+): string {
+  const sp = audit?.suggestedPitch;
+  if (channel === "WHATSAPP") {
+    if (step === 1) return sp?.whatsappFollowUp1 || `Hi ${business.name} team! Just following up on my previous message regarding the website concept we built for you in ${business.city}. Did you have a chance to take a look?`;
+    if (step === 2) return sp?.whatsappFollowUp2 || `Hey ${business.name} team, quick thought — adding direct WhatsApp appointment booking could easily drive 25-30% more bookings each month. Happy to share a quick preview!`;
+    if (step === 3) return sp?.whatsappBreakup || `Hi ${business.name} team, I assume you're busy with other priorities right now, so I won't flood your messages. Feel free to ping me anytime if you'd like to explore this!`;
+    return sp?.whatsapp || `Hi ${business.name}! We noticed your great local presence in ${business.city} and put together a custom website concept for your business. Would love to share the preview with you!`;
+  } else {
+    // EMAIL
+    if (step === 1) return sp?.emailFollowUp1 || `Subject: Re: Quick concept for ${business.name}\n\nHi Team ${business.name},\n\nJust wanted to quickly follow up on my previous note. We put together a complimentary concept for ${business.name} to help convert more local Google searchers into clients.\n\nLet me know if you have 5 minutes this week to take a look!`;
+    if (step === 2) return sp?.emailFollowUp2 || `Subject: Quick idea for ${business.name}\n\nHi Team ${business.name},\n\nI was looking at similar businesses in ${business.city} and noticed that adding instant mobile booking increased their client inquiries significantly.\n\nWould you be open to seeing a 2-minute walkthrough of how we could implement this for ${business.name}?`;
+    if (step === 3) return sp?.emailBreakup || `Subject: Closing the loop for ${business.name}\n\nHi Team ${business.name},\n\nI haven't heard back, so I assume this isn't a priority for ${business.name} right now — totally understand!\n\nI'll close our file here and won't follow up again. If priorities ever shift, feel free to reach back out anytime.`;
+    return sp?.email || `Subject: Custom website concept for ${business.name}\n\nHi Team ${business.name},\n\nWe noticed your strong local presence in ${business.city} and created a personalized demo concept showing how a modern web presence could streamline new inquiries for ${business.name}.\n\nWould you be open to a quick 5-minute walkthrough of the concept?`;
+  }
 }
