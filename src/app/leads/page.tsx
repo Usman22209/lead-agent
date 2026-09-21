@@ -83,7 +83,7 @@ function LeadsPipelineContent() {
 
         if (data.availableCities && Array.isArray(data.availableCities)) {
           const combinedCities = Array.from(
-            new Set(["London", "Lahore", "Karachi", "Dubai", "Islamabad", "New York", ...data.availableCities])
+            new Set(["London", "New York", "Dubai", "Los Angeles", "Toronto", "Sydney", "Singapore", "Berlin", "Paris", "Miami", "Chicago", "Melbourne", ...data.availableCities])
           );
           setAvailableCities(combinedCities);
         }

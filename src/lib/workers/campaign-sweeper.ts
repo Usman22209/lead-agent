@@ -18,9 +18,9 @@ export interface SweepResult {
 export class CampaignSweeper {
   private static campaigns: TargetCampaign[] = [
     { id: "q1", keyword: "Gyms & Fitness", location: "London", enabled: true },
-    { id: "q2", keyword: "Dentists", location: "Lahore", enabled: true },
+    { id: "q2", keyword: "Dentists", location: "New York", enabled: true },
     { id: "q3", keyword: "Beauty Salons & Spas", location: "Dubai", enabled: true },
-    { id: "q4", keyword: "Medical Clinics", location: "Karachi", enabled: true },
+    { id: "q4", keyword: "Medical Clinics", location: "Los Angeles", enabled: true },
   ];
 
   private static currentIndex = 0;

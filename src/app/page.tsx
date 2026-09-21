@@ -294,10 +294,10 @@ export default function DashboardPage() {
               <div className="space-y-1.5">
                 {[
                   { niche: "Gyms & Fitness", location: "London" },
-                  { niche: "Dentists", location: "Lahore" },
+                  { niche: "Dentists", location: "New York" },
                   { niche: "Real Estate", location: "Dubai" },
-                  { niche: "Beauty Salons & Spas", location: "Karachi" },
-                  { niche: "Law Firms", location: "Islamabad" },
+                  { niche: "Beauty Salons & Spas", location: "Los Angeles" },
+                  { niche: "Law Firms", location: "Toronto" },
                 ].map((preset, idx) => (
                   <Link
                     key={idx}

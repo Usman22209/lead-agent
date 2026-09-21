@@ -40,7 +40,11 @@ const POPULAR_NICHES = [
   "Car Dealerships",
 ];
 
-const POPULAR_CITIES = ["London", "Lahore", "Karachi", "Dubai", "Islamabad", "New York"];
+const POPULAR_CITIES = [
+  "London", "New York", "Dubai", "Los Angeles", "Toronto", "Sydney",
+  "Singapore", "Berlin", "Paris", "Miami", "Chicago", "Melbourne",
+  "Amsterdam", "San Francisco", "Austin", "Manchester", "Tokyo", "Hong Kong",
+];
 
 function DiscoveryContent() {
   const searchParams = useSearchParams();
@@ -262,7 +266,7 @@ function DiscoveryContent() {
                   type="text"
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
-                  placeholder="e.g. London, Lahore, Karachi, Dubai..."
+                  placeholder="e.g. London, New York, Dubai, Sydney..."
                   className="w-full bg-[#080c14] border border-white/10 rounded-lg px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500"
                   required
                 />
