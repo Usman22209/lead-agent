@@ -31,6 +31,7 @@ import {
   Zap,
   ArrowRight,
   FileText,
+  Layers,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -135,6 +136,32 @@ function LeadsPipelineContent() {
       console.error("[Leads UI] Delete failed:", e);
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const [isBulkEnqueuing, setIsBulkEnqueuing] = useState(false);
+
+  const handleEnqueueSelected = async () => {
+    if (selectedIds.length === 0) return;
+    setIsBulkEnqueuing(true);
+    try {
+      const res = await fetch("/api/autopilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "enqueue", businessIds: selectedIds, priority: 2 }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert("Enqueued selected leads into Autopilot Queue!");
+        setSelectedIds([]);
+        fetchLeads();
+      } else {
+        alert(data.error || "Failed to enqueue leads");
+      }
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    } finally {
+      setIsBulkEnqueuing(false);
     }
   };
 
@@ -368,14 +395,26 @@ function LeadsPipelineContent() {
                 <span>leads selected</span>
               </div>
 
-              <button
-                onClick={handleDeleteSelected}
-                disabled={isDeleting}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/30 text-rose-300 text-xs font-medium transition cursor-pointer"
-              >
-                <Trash2 className="h-3 w-3" />
-                <span>{isDeleting ? "Deleting..." : "Delete Selected"}</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleEnqueueSelected}
+                  disabled={isBulkEnqueuing}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition cursor-pointer disabled:opacity-50"
+                  title="Enqueue selected leads to Autopilot Queue"
+                >
+                  <Layers className="h-3 w-3" />
+                  <span>{isBulkEnqueuing ? "Queueing..." : "Enqueue Selected to Autopilot"}</span>
+                </button>
+
+                <button
+                  onClick={handleDeleteSelected}
+                  disabled={isDeleting}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/30 text-rose-300 text-xs font-medium transition cursor-pointer"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  <span>{isDeleting ? "Deleting..." : "Delete Selected"}</span>
+                </button>
+              </div>
             </div>
           )}
         </div>

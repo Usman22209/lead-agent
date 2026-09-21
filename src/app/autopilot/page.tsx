@@ -4,6 +4,8 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { Header } from "@/components/Header";
 import { WhatsAppConnectModal } from "@/components/WhatsAppConnectModal";
+import { PriorityBadge } from "@/components/PriorityBadge";
+import { ScoreGauge } from "@/components/ScoreGauge";
 import {
   Play,
   Pause,
@@ -26,6 +28,9 @@ import {
   MapPin,
   Flame,
   Mail,
+  Layers,
+  Sparkles,
+  ExternalLink,
 } from "lucide-react";
 
 export default function AutoPilotPage() {
@@ -35,6 +40,7 @@ export default function AutoPilotPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [isWaModalOpen, setIsWaModalOpen] = useState(false);
+  const [instantOutreachLoading, setInstantOutreachLoading] = useState<string | null>(null);
 
   // Settings Form State
   const [dailyLimit, setDailyLimit] = useState(35);
@@ -136,6 +142,98 @@ export default function AutoPilotPage() {
       console.error("Failed to trigger cycle:", err);
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleSweepNow = async () => {
+    setActionLoading(true);
+    try {
+      const res = await fetch("/api/autopilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "sweep-now" }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setEngineState(data.data);
+      }
+    } catch (err) {
+      console.error("Failed to trigger sweep:", err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRequeueQualified = async () => {
+    setActionLoading(true);
+    try {
+      const res = await fetch("/api/autopilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "requeue-qualified", minScore }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setEngineState(data.data);
+      }
+    } catch (err) {
+      console.error("Failed to requeue leads:", err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRemoveFromQueue = async (queueItemId: string) => {
+    try {
+      const res = await fetch("/api/autopilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "remove-queue-item", queueItemId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setEngineState(data.data);
+      }
+    } catch (err) {
+      console.error("Failed to remove item:", err);
+    }
+  };
+
+  const handleDrainQueue = async () => {
+    if (!confirm("Are you sure you want to clear all pending leads from the autopilot queue?")) return;
+    try {
+      const res = await fetch("/api/autopilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear-queue" }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setEngineState(data.data);
+      }
+    } catch (err) {
+      console.error("Failed to drain queue:", err);
+    }
+  };
+
+  const handleInstantOutreach = async (businessId: string) => {
+    setInstantOutreachLoading(businessId);
+    try {
+      const res = await fetch(`/api/leads/${businessId}/instant-outreach`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ followUpIntervalDays }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchData();
+      } else {
+        alert(data.error || "Instant outreach failed");
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally {
+      setInstantOutreachLoading(null);
     }
   };
 
@@ -263,22 +361,49 @@ export default function AutoPilotPage() {
   const limitCount = engineState?.dailyLimit || dailyLimit;
   const progressPercent = Math.min(100, Math.round((sentCount / (limitCount || 1)) * 100));
 
+  // Determine granular state display
+  const currentLoopStatus = engineState?.status || (engineState?.isActive ? "RUNNING" : "PAUSED");
+
   return (
     <div className="flex-1 flex flex-col pb-16">
       <Header
-        title="Autonomous Auto-Pilot Outbound"
-        subtitle="Automated 24/7 lead scraping, Gemini 2.5 Flash audits, and paced WhatsApp dispatch with client reply sync"
+        title="Autonomous Queue & Outbound Engine"
+        subtitle="Durable persistent queue, crash-recoverable loop worker, JIT Gemini audits, and humanized multi-channel dispatch"
       />
 
       <div className="px-8 mt-6 space-y-6 max-w-7xl w-full mx-auto">
         {/* Top Control Banner */}
         <div className="p-6 rounded-2xl bg-[#0d1322] border border-white/[0.08] flex flex-col lg:flex-row lg:items-center justify-between gap-6 shadow-xl">
           <div className="space-y-2 max-w-2xl">
-            <div className="flex items-center gap-2">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-indigo-500/15 text-indigo-400 text-[11px] font-semibold border border-indigo-500/30">
-                <Radio className={`h-3 w-3 ${engineState?.isActive ? "animate-pulse text-emerald-400" : ""}`} />
-                <span>Auto-Pilot Status: {engineState?.isActive ? "RUNNING (ACTIVE)" : "PAUSED"}</span>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Loop status badge */}
+              <div
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border ${
+                  currentLoopStatus === "RUNNING"
+                    ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                    : currentLoopStatus === "SLEEPING_DELAY"
+                    ? "bg-amber-500/15 text-amber-300 border-amber-500/30 animate-pulse"
+                    : currentLoopStatus === "WORK_HOURS_PAUSED"
+                    ? "bg-blue-500/15 text-blue-300 border-blue-500/30"
+                    : currentLoopStatus === "DAILY_QUOTA_REACHED"
+                    ? "bg-rose-500/15 text-rose-300 border-rose-500/30"
+                    : currentLoopStatus === "IDLE"
+                    ? "bg-indigo-500/15 text-indigo-300 border-indigo-500/30"
+                    : "bg-slate-800 text-slate-400 border-slate-700"
+                }`}
+              >
+                <Radio className={`h-3 w-3 ${engineState?.isActive ? "animate-pulse" : ""}`} />
+                <span>
+                  {currentLoopStatus === "RUNNING" && "ACTIVE (DISPATCHING)"}
+                  {currentLoopStatus === "SLEEPING_DELAY" &&
+                    `PACING DELAY (${engineState?.delayRemainingSeconds || 0}s remaining)`}
+                  {currentLoopStatus === "WORK_HOURS_PAUSED" && "OFF-HOURS (SLEEPING)"}
+                  {currentLoopStatus === "DAILY_QUOTA_REACHED" && "DAILY QUOTA REACHED"}
+                  {currentLoopStatus === "IDLE" && "IDLE (WAITING FOR QUEUE)"}
+                  {currentLoopStatus === "PAUSED" && "PAUSED"}
+                </span>
               </div>
+
               {isWaConnected ? (
                 <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-400 px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
                   <Smartphone className="h-3 w-3" /> WhatsApp Linked (+{waState?.phoneNumber})
@@ -291,36 +416,46 @@ export default function AutoPilotPage() {
             </div>
 
             <h2 className="text-lg font-bold text-white tracking-tight">
-              Hands-Free Outbound Prospecting & Outreach Machine
+              Queue-Driven Autonomous Prospecting Machine
             </h2>
             <p className="text-xs text-slate-400 leading-relaxed">
-              The agent autonomously scans target niches, qualifies high-ROI leads (Score ≥ {minScore}), generates custom Gemini pitches, and sends messages with human pacing delays directly from your linked WhatsApp.
+              Scrapes raw prospects into a durable queue, performs Just-In-Time (JIT) Gemini audits to avoid rate limits, and dispatches human-paced messages across WhatsApp and Gmail.
             </p>
           </div>
 
           {/* Action Trigger Buttons */}
-          <div className="flex flex-wrap items-center gap-3 flex-shrink-0">
+          <div className="flex flex-wrap items-center gap-2.5 flex-shrink-0">
             <button
               onClick={() => setIsWaModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/10 text-white text-xs font-semibold transition cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/10 text-white text-xs font-semibold transition cursor-pointer"
             >
-              <Smartphone className="h-4 w-4 text-emerald-400" />
-              <span>{isWaConnected ? "Manage WhatsApp" : "Pair WhatsApp (QR)"}</span>
+              <Smartphone className="h-3.5 w-3.5 text-emerald-400" />
+              <span>{isWaConnected ? "WhatsApp" : "Pair WhatsApp"}</span>
+            </button>
+
+            <button
+              onClick={handleSweepNow}
+              disabled={actionLoading}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 text-xs font-semibold transition disabled:opacity-40 cursor-pointer"
+              title="Trigger Market Sweep to enqueue new leads"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-purple-400" />
+              <span>Sweep Market</span>
             </button>
 
             <button
               onClick={handleRunImmediateCycle}
-              disabled={actionLoading || !isWaConnected}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 text-xs font-semibold transition disabled:opacity-40 cursor-pointer"
+              disabled={actionLoading}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 text-xs font-semibold transition disabled:opacity-40 cursor-pointer"
             >
-              <Zap className="h-4 w-4 text-indigo-400" />
-              <span>Run 1 Cycle Now</span>
+              <Zap className="h-3.5 w-3.5 text-indigo-400" />
+              <span>Run 1 Step</span>
             </button>
 
             <button
               onClick={handleToggleEngine}
               disabled={actionLoading}
-              className={`inline-flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold shadow-lg transition cursor-pointer ${
+              className={`inline-flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold shadow-lg transition cursor-pointer ${
                 engineState?.isActive
                   ? "bg-amber-600 hover:bg-amber-500 text-white"
                   : "bg-emerald-600 hover:bg-emerald-500 text-white"
@@ -328,13 +463,13 @@ export default function AutoPilotPage() {
             >
               {engineState?.isActive ? (
                 <>
-                  <Pause className="h-4 w-4 fill-white" />
-                  <span>Pause Auto-Pilot</span>
+                  <Pause className="h-3.5 w-3.5 fill-white" />
+                  <span>Pause Autopilot</span>
                 </>
               ) : (
                 <>
-                  <Play className="h-4 w-4 fill-white" />
-                  <span>Start 24/7 Auto-Pilot</span>
+                  <Play className="h-3.5 w-3.5 fill-white" />
+                  <span>Start Loop</span>
                 </>
               )}
             </button>
@@ -371,70 +506,213 @@ export default function AutoPilotPage() {
             </div>
           </div>
 
-          {/* Card 2: Outreach Channels */}
-          <div className="p-5 rounded-xl bg-[#0d1322] border border-white/[0.07] space-y-2.5">
+          {/* Card 2: Persistent Queue Depth */}
+          <div className="p-5 rounded-xl bg-[#0d1322] border border-white/[0.07] space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Outreach Channels
+              <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-400">
+                Persistent Queue
               </span>
-              <div className="flex items-center gap-1.5">
-                <Smartphone className="h-3.5 w-3.5 text-emerald-400" />
-                <Mail className="h-3.5 w-3.5 text-blue-400" />
-              </div>
+              <Layers className="h-4 w-4 text-indigo-400" />
             </div>
-            <div className="space-y-1.5 pt-0.5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-400 flex items-center gap-1.5">
-                  <span className={`h-1.5 w-1.5 rounded-full ${isWaConnected ? "bg-emerald-400" : "bg-slate-500"}`} />
-                  WhatsApp:
-                </span>
-                <span className="font-mono text-white text-[11px] truncate max-w-[120px]">
-                  {isWaConnected ? `+${waState?.phoneNumber}` : "Unlinked"}
-                </span>
+            <div>
+              <div className="text-2xl font-bold font-mono text-white flex items-baseline gap-2">
+                <span className="text-indigo-400">{engineState?.queueStats?.pending || 0}</span>
+                <span className="text-xs text-slate-400 font-sans">waiting in line</span>
               </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-400 flex items-center gap-1.5">
-                  <span className={`h-1.5 w-1.5 rounded-full ${emailStatus?.isConfigured ? (emailStatus?.isValid ? "bg-emerald-400" : "bg-amber-400") : "bg-slate-500"}`} />
-                  Gmail:
-                </span>
-                <span className="font-mono text-white text-[11px] truncate max-w-[120px]" title={emailStatus?.userEmail || ""}>
-                  {emailStatus?.isConfigured ? (emailStatus?.userEmail || "Configured") : "Not Configured"}
-                </span>
+              <div className="flex items-center gap-3 text-[11px] text-slate-400 mt-1 font-mono">
+                <span>{engineState?.queueStats?.processing || 0} active</span>
+                <span>•</span>
+                <span>{engineState?.queueStats?.completed || 0} done</span>
+                <span>•</span>
+                <span>{engineState?.queueStats?.failed || 0} failed</span>
               </div>
             </div>
           </div>
 
-          {/* Card 3: Pacing Delay */}
+          {/* Card 3: Pacing Jitter Delay */}
           <div className="p-5 rounded-xl bg-[#0d1322] border border-white/[0.07] space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-400">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                 Human Jitter Pacing
               </span>
-              <Clock className="h-4 w-4 text-indigo-400" />
+              <Clock className="h-4 w-4 text-amber-400" />
             </div>
             <div>
-              <div className="text-2xl font-bold font-mono text-indigo-400">
+              <div className="text-2xl font-bold font-mono text-amber-400">
                 {minDelay}–{maxDelay}s
               </div>
-              <p className="text-[11px] text-slate-400 mt-0.5">Randomized spacing between sends</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                {currentLoopStatus === "SLEEPING_DELAY" ? `Active countdown: ${engineState?.delayRemainingSeconds || 0}s` : "Randomized inter-message pacing"}
+              </p>
             </div>
           </div>
 
           {/* Card 4: Inbound Responses */}
           <div className="p-5 rounded-xl bg-[#0d1322] border border-white/[0.07] space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400">
-                Client Inbound Replies
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">
+                Inbound Client Replies
               </span>
-              <MessageSquare className="h-4 w-4 text-amber-400" />
+              <MessageSquare className="h-4 w-4 text-emerald-400" />
             </div>
             <div>
-              <div className="text-2xl font-bold font-mono text-amber-400">
+              <div className="text-2xl font-bold font-mono text-emerald-400">
                 {waState?.recentInbound?.length || 0}
               </div>
-              <p className="text-[11px] text-slate-400 mt-0.5">Synced live to your phone</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">Live WhatsApp client conversations</p>
             </div>
           </div>
+        </div>
+
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {/* NEW SECTION: ACTIVE PERSISTENT AUTOPILOT QUEUE TABLE */}
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        <div className="p-5 rounded-xl bg-[#0d1322] border border-white/[0.08] space-y-4 shadow-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+                <Layers className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <span>Autopilot Queue Stream</span>
+                  <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-mono">
+                    {engineState?.activeQueue?.length || 0} leads shown
+                  </span>
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Leads lined up for Just-In-Time Gemini audits and outreach dispatch
+                </p>
+              </div>
+            </div>
+
+            {/* Queue Management Actions */}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={handleRequeueQualified}
+                disabled={actionLoading}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-semibold transition cursor-pointer disabled:opacity-50"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Enqueue Qualified Leads (Score ≥ {minScore})</span>
+              </button>
+
+              <button
+                onClick={handleDrainQueue}
+                disabled={actionLoading || !engineState?.activeQueue || engineState.activeQueue.length === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20 text-xs font-semibold transition cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Drain Queue</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Queue Items Table */}
+          {!engineState?.activeQueue || engineState.activeQueue.length === 0 ? (
+            <div className="p-8 text-center rounded-xl bg-[#080c14] border border-dashed border-white/10 space-y-2">
+              <Layers className="h-6 w-6 text-slate-600 mx-auto" />
+              <h4 className="text-xs font-bold text-slate-300">The Autopilot Queue is Empty</h4>
+              <p className="text-[11px] text-slate-500 max-w-md mx-auto">
+                The autonomous sweeper will automatically discover and enqueue leads when the loop is running, or you can click <strong>&quot;Enqueue Qualified Leads&quot;</strong> above to fill the queue from existing prospects.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-white/5">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-[#080c14] text-slate-400 font-semibold border-b border-white/5">
+                  <tr>
+                    <th className="px-3.5 py-2.5">Priority</th>
+                    <th className="px-3.5 py-2.5">Business / Prospect</th>
+                    <th className="px-3.5 py-2.5">Location</th>
+                    <th className="px-3.5 py-2.5">Contact Channels</th>
+                    <th className="px-3.5 py-2.5">Lead Score</th>
+                    <th className="px-3.5 py-2.5">Status</th>
+                    <th className="px-3.5 py-2.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {engineState.activeQueue.map((item: any, idx: number) => {
+                    const biz = item.business;
+                    const isProcessing = item.status === "PROCESSING";
+
+                    return (
+                      <tr
+                        key={item.id}
+                        className={`hover:bg-white/[0.02] transition ${
+                          isProcessing ? "bg-indigo-500/5 font-medium" : ""
+                        }`}
+                      >
+                        <td className="px-3.5 py-3 font-mono text-slate-400">
+                          #{idx + 1}
+                        </td>
+                        <td className="px-3.5 py-3">
+                          <div className="font-semibold text-white">{biz?.name}</div>
+                          <div className="text-[10px] text-slate-400">{biz?.category}</div>
+                        </td>
+                        <td className="px-3.5 py-3 text-slate-300">
+                          {biz?.city}
+                        </td>
+                        <td className="px-3.5 py-3">
+                          <div className="flex items-center gap-2">
+                            {biz?.phone ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 font-mono">
+                                <Smartphone className="h-3 w-3" /> {biz.phone}
+                              </span>
+                            ) : null}
+                            {biz?.email ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20">
+                                <Mail className="h-3 w-3" /> Email
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="px-3.5 py-3">
+                          {biz?.lead?.score !== undefined ? (
+                            <span className="font-mono font-bold text-indigo-300">
+                              {biz.lead.score}/100
+                            </span>
+                          ) : (
+                            <span className="text-slate-500">Unscored</span>
+                          )}
+                        </td>
+                        <td className="px-3.5 py-3">
+                          {isProcessing ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 animate-pulse">
+                              <RefreshCw className="h-2.5 w-2.5 animate-spin" /> JIT Processing
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                              Queued
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3.5 py-3 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => handleInstantOutreach(biz.id)}
+                              disabled={instantOutreachLoading === biz.id}
+                              className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold transition cursor-pointer disabled:opacity-40"
+                              title="Instant 1-Click AI Outreach"
+                            >
+                              {instantOutreachLoading === biz.id ? "Sending..." : "Pitch Now"}
+                            </button>
+                            <button
+                              onClick={() => handleRemoveFromQueue(item.id)}
+                              className="p-1 text-slate-500 hover:text-rose-400 transition cursor-pointer"
+                              title="Remove from queue"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* 2-Column Split: Left = Settings & Target Queues | Right = Live Activity Stream */}
@@ -449,7 +727,7 @@ export default function AutoPilotPage() {
                     <Flame className="h-4 w-4 text-orange-400" />
                     Target Campaign Queues
                   </h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5">The agent cycles through these markets in order</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">The autonomous sweeper rotates through these niches</p>
                 </div>
               </div>
 
@@ -693,19 +971,6 @@ export default function AutoPilotPage() {
                       </button>
                     ))}
                   </div>
-                  <div className="text-[10px] text-slate-500 flex flex-col gap-0.5 pt-0.5">
-                    <span>• Touch 1: Value bump & soft check-in</span>
-                    <span>• Touch 2: Social proof & feature win</span>
-                    {maxFollowUps >= 3 && <span>• Touch 3: Courteous breakup message</span>}
-                  </div>
-                </div>
-
-                {/* Anti-Spam Halt Guarantee Alert */}
-                <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px] leading-relaxed flex items-start gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                  <span>
-                    <strong>Instant Halt Rule Active:</strong> The millisecond a lead replies via WhatsApp or email, their status becomes <em>MEETING/REPLIED</em> and all future automated follow-ups immediately freeze.
-                  </span>
                 </div>
 
                 {/* Save Follow-Up Settings */}
@@ -739,7 +1004,7 @@ export default function AutoPilotPage() {
                   <Radio className="h-8 w-8 text-slate-600 mx-auto" />
                   <h4 className="text-xs font-bold text-slate-300">No Outbound Events Logged Yet</h4>
                   <p className="text-[11px] text-slate-500">
-                    Click <strong>&quot;Start 24/7 Auto-Pilot&quot;</strong> or <strong>&quot;Run 1 Cycle Now&quot;</strong> above to start autonomous prospecting.
+                    Click <strong>&quot;Start Loop&quot;</strong> or <strong>&quot;Run 1 Step&quot;</strong> above to start autonomous prospecting.
                   </p>
                 </div>
               ) : (
@@ -749,6 +1014,7 @@ export default function AutoPilotPage() {
                     const isError = log.type === "WHATSAPP_ERROR";
                     const isAudit = log.type === "AUDIT";
                     const isDiscovery = log.type === "DISCOVERY";
+                    const isQueued = log.type === "QUEUE_ENQUEUED";
 
                     return (
                       <div
@@ -761,6 +1027,8 @@ export default function AutoPilotPage() {
                             : isAudit
                             ? "bg-indigo-500/10 border-indigo-500/20 text-indigo-200"
                             : isDiscovery
+                            ? "bg-purple-500/10 border-purple-500/20 text-purple-200"
+                            : isQueued
                             ? "bg-blue-500/10 border-blue-500/20 text-blue-200"
                             : "bg-[#080c14] border-white/5 text-slate-300"
                         }`}

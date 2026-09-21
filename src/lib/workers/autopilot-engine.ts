@@ -1,17 +1,21 @@
+import fs from "fs";
+import path from "path";
 import cron, { ScheduledTask } from "node-cron";
 import { prisma } from "@/lib/db";
-import { LeadService } from "@/lib/services/lead-service";
-import { generateGeminiAudit, sanitizePitchText, getFollowUpPitch } from "@/lib/ai/gemini";
 import { whatsAppManager } from "@/lib/outreach/whatsapp-service";
 import { EmailService } from "@/lib/outreach/email-service";
-import { EmailScraper } from "@/lib/collectors/email-scraper";
+import { getFollowUpPitch } from "@/lib/ai/gemini";
+import { QueueManager, QueueStats } from "./queue-manager";
+import { LeadPipeline } from "./lead-pipeline";
+import { CampaignSweeper, TargetCampaign } from "./campaign-sweeper";
 
-export interface TargetCampaignQueue {
-  id: string;
-  keyword: string;
-  location: string;
-  enabled: boolean;
-}
+export type AutoPilotStatus =
+  | "IDLE"
+  | "RUNNING"
+  | "SLEEPING_DELAY"
+  | "WORK_HOURS_PAUSED"
+  | "DAILY_QUOTA_REACHED"
+  | "PAUSED";
 
 export interface AutoPilotConfig {
   dailyWhatsAppLimit: number;
@@ -25,12 +29,25 @@ export interface AutoPilotConfig {
   enableFollowUps: boolean;
   followUpIntervalDays: number;
   maxFollowUps: number;
+  autoReplenishThreshold: number; // Replenish if pending queue falls below this
 }
 
 export interface AutoPilotLog {
   id: string;
   timestamp: string;
-  type: "DISCOVERY" | "AUDIT" | "WHATSAPP_SENT" | "WHATSAPP_ERROR" | "EMAIL_SENT" | "EMAIL_ERROR" | "FOLLOWUP_SENT" | "FOLLOWUP_ERROR" | "INFO" | "SKIPPED";
+  type:
+    | "DISCOVERY"
+    | "AUDIT"
+    | "WHATSAPP_SENT"
+    | "WHATSAPP_ERROR"
+    | "EMAIL_SENT"
+    | "EMAIL_ERROR"
+    | "FOLLOWUP_SENT"
+    | "FOLLOWUP_ERROR"
+    | "QUEUE_ENQUEUED"
+    | "QUEUE_CLEARED"
+    | "INFO"
+    | "SKIPPED";
   message: string;
   businessName?: string;
   phone?: string;
@@ -38,541 +55,559 @@ export interface AutoPilotLog {
 }
 
 export interface AutoPilotState {
+  status: AutoPilotStatus;
   isActive: boolean;
   sentToday: number;
   emailsSentToday: number;
   followUpsSentToday: number;
   pendingFollowUpsDue: number;
   dailyLimit: number;
-  currentQueueIndex: number;
-  targetQueues: TargetCampaignQueue[];
+  queueStats: QueueStats;
+  activeQueue: any[];
+  targetQueues: TargetCampaign[];
   config: AutoPilotConfig;
   logs: AutoPilotLog[];
   lastRunAt: string | null;
   nextScheduledRun: string | null;
+  delayRemainingSeconds?: number;
 }
 
 class AutoPilotEngine {
-  private isActive = false;
+  private status: AutoPilotStatus = "IDLE";
+  private isRunning = false;
+  private stopRequested = false;
+  private isProcessingStep = false;
+  private loopPromise: Promise<void> | null = null;
+
   private sentToday = 0;
   private emailsSentToday = 0;
   private followUpsSentToday = 0;
   private lastResetDate = new Date().toDateString();
-  private cronJob: ScheduledTask | null = null;
-  private currentQueueIndex = 0;
   private lastRunAt: string | null = null;
   private logs: AutoPilotLog[] = [];
-
-  private targetQueues: TargetCampaignQueue[] = [
-    { id: "q1", keyword: "Gyms & Fitness", location: "London", enabled: true },
-    { id: "q2", keyword: "Dentists", location: "Lahore", enabled: true },
-    { id: "q3", keyword: "Beauty Salons & Spas", location: "Dubai", enabled: true },
-    { id: "q4", keyword: "Medical Clinics", location: "Karachi", enabled: true },
-  ];
+  private delayRemainingSeconds = 0;
 
   private config: AutoPilotConfig = {
     dailyWhatsAppLimit: 35,
     enableEmail: true,
     minDelaySeconds: 30,
     maxDelaySeconds: 60,
-    workHoursOnly: false, // Default false so user can test immediately at any time
+    workHoursOnly: false,
     startHour: 9,
     endHour: 18,
-    minimumScore: 70, // Priority A & B leads
+    minimumScore: 70,
     enableFollowUps: true,
     followUpIntervalDays: 2,
     maxFollowUps: 2,
+    autoReplenishThreshold: 3,
   };
 
+  private stateFilePath = path.join(process.cwd(), "data", "autopilot_state.json");
+
   constructor() {
-    // Schedule midnight reset for daily counter
+    this.ensureDataDir();
+    this.loadState();
+
+    // Midnight counter reset
     cron.schedule("0 0 * * *", () => {
       this.sentToday = 0;
       this.emailsSentToday = 0;
       this.followUpsSentToday = 0;
       this.lastResetDate = new Date().toDateString();
+      this.saveState();
       this.addLog("INFO", "Daily dispatch counters reset to 0 for the new day.");
     });
   }
 
-  public getState(): AutoPilotState {
-    this.checkDailyReset();
-    return {
-      isActive: this.isActive,
-      sentToday: this.sentToday,
-      emailsSentToday: this.emailsSentToday,
-      followUpsSentToday: this.followUpsSentToday,
-      pendingFollowUpsDue: 0,
-      dailyLimit: this.config.dailyWhatsAppLimit,
-      currentQueueIndex: this.currentQueueIndex,
-      targetQueues: this.targetQueues,
-      config: this.config,
-      logs: this.logs.slice(-25).reverse(),
-      lastRunAt: this.lastRunAt,
-      nextScheduledRun: this.isActive ? "Running active dispatch loop" : "Paused",
-    };
-  }
-
-  public async getStateAsync(): Promise<AutoPilotState> {
-    const state = this.getState();
+  private ensureDataDir() {
     try {
-      state.pendingFollowUpsDue = await prisma.business.count({
-        where: {
-          status: "CONTACTED",
-          nextFollowUpAt: { lte: new Date() },
-          followUpCount: { lt: this.config.maxFollowUps },
-        },
-      });
-    } catch {}
-    return state;
+      const dataDir = path.dirname(this.stateFilePath);
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+    } catch (e: any) {
+      console.warn("Failed to create data dir:", e.message);
+    }
   }
 
-  public updateConfig(newConfig: Partial<AutoPilotConfig>, newQueues?: TargetCampaignQueue[]) {
-    this.config = { ...this.config, ...newConfig };
-    if (newQueues) this.targetQueues = newQueues;
-    this.addLog("INFO", "Auto-Pilot configuration & queues updated.");
+  private loadState() {
+    try {
+      if (fs.existsSync(this.stateFilePath)) {
+        const raw = fs.readFileSync(this.stateFilePath, "utf8");
+        const saved = JSON.parse(raw);
+        if (saved.config) this.config = { ...this.config, ...saved.config };
+        if (saved.sentToday && saved.lastResetDate === new Date().toDateString()) {
+          this.sentToday = saved.sentToday;
+          this.emailsSentToday = saved.emailsSentToday || 0;
+          this.followUpsSentToday = saved.followUpsSentToday || 0;
+        }
+        if (saved.campaigns) {
+          CampaignSweeper.setCampaigns(saved.campaigns);
+        }
+        console.log("💾 [AutoPilotEngine] State restored from disk.");
+      }
+    } catch (e: any) {
+      console.warn("Failed to restore state:", e.message);
+    }
   }
 
-  public start(): void {
-    if (this.isActive) return;
-    this.isActive = true;
-    this.addLog("INFO", "🚀 Auto-Pilot Outbound Agent started.");
-
-    // Trigger an immediate execution run asynchronously
-    this.runExecutionCycle().catch((err) => {
-      this.addLog("INFO", `Cycle error: ${err.message}`);
-    });
-  }
-
-  public pause(): void {
-    this.isActive = false;
-    this.addLog("INFO", "⏸️ Auto-Pilot Outbound Agent paused.");
+  private saveState() {
+    try {
+      this.ensureDataDir();
+      const statePayload = {
+        sentToday: this.sentToday,
+        emailsSentToday: this.emailsSentToday,
+        followUpsSentToday: this.followUpsSentToday,
+        lastResetDate: this.lastResetDate,
+        config: this.config,
+        campaigns: CampaignSweeper.getCampaigns(),
+        lastRunAt: this.lastRunAt,
+      };
+      fs.writeFileSync(this.stateFilePath, JSON.stringify(statePayload, null, 2), "utf8");
+    } catch (e: any) {
+      console.warn("Failed to save state to disk:", e.message);
+    }
   }
 
   private checkDailyReset() {
     const today = new Date().toDateString();
     if (today !== this.lastResetDate) {
       this.sentToday = 0;
+      this.emailsSentToday = 0;
+      this.followUpsSentToday = 0;
       this.lastResetDate = today;
+      this.saveState();
     }
   }
 
-  public async runExecutionCycle(): Promise<void> {
-    if (!this.isActive) return;
+  private isWithinWorkingHours(): boolean {
+    if (!this.config.workHoursOnly) return true;
+    const currentHour = new Date().getHours();
+    return currentHour >= this.config.startHour && currentHour < this.config.endHour;
+  }
+
+  public getState(): AutoPilotState {
     this.checkDailyReset();
+    return {
+      status: this.status,
+      isActive: this.isRunning,
+      sentToday: this.sentToday,
+      emailsSentToday: this.emailsSentToday,
+      followUpsSentToday: this.followUpsSentToday,
+      pendingFollowUpsDue: 0,
+      dailyLimit: this.config.dailyWhatsAppLimit,
+      queueStats: { pending: 0, processing: 0, completed: 0, failed: 0, skipped: 0, total: 0 },
+      activeQueue: [],
+      targetQueues: CampaignSweeper.getCampaigns(),
+      config: this.config,
+      logs: this.logs.slice(-30).reverse(),
+      lastRunAt: this.lastRunAt,
+      nextScheduledRun: this.isRunning ? "Active Loop Worker" : "Paused",
+      delayRemainingSeconds: this.delayRemainingSeconds,
+    };
+  }
 
-    // 1. Check Daily Limit
-    if (this.sentToday >= this.config.dailyWhatsAppLimit) {
-      this.addLog(
-        "INFO",
-        `Daily limit of ${this.config.dailyWhatsAppLimit} messages reached for today (${this.sentToday} sent). Sleeping until next cycle.`
-      );
-      return;
-    }
-
-    // 2. Check Business Hours if enabled
-    if (this.config.workHoursOnly) {
-      const currentHour = new Date().getHours();
-      if (currentHour < this.config.startHour || currentHour >= this.config.endHour) {
-        this.addLog("INFO", `Outside business hours (${this.config.startHour}:00 - ${this.config.endHour}:00). Sleeping.`);
-        return;
-      }
-    }
-
-    // ══════════════════════════════════════════════════════════════════════
-    // 3. PRIORITY PHASE 1: DISPATCH DUE FOLLOW-UPS (HIGHEST CONVERSION ROI)
-    // ══════════════════════════════════════════════════════════════════════
-    if (this.config.enableFollowUps) {
-      try {
-        const now = new Date();
-        const dueFollowUps = await prisma.business.findMany({
+  public async getStateAsync(): Promise<AutoPilotState> {
+    const state = this.getState();
+    try {
+      const [queueStats, activeQueue, dueFollowUps] = await Promise.all([
+        QueueManager.getQueueStats(),
+        QueueManager.getQueueItems(15),
+        prisma.business.count({
           where: {
             status: "CONTACTED",
-            nextFollowUpAt: { lte: now },
+            nextFollowUpAt: { lte: new Date() },
             followUpCount: { lt: this.config.maxFollowUps },
           },
-          include: { lead: true },
-          take: 5,
-        });
+        }),
+      ]);
 
-        if (dueFollowUps.length > 0) {
-          this.addLog("INFO", `Found ${dueFollowUps.length} follow-up(s) due for outreach sequence. Processing...`);
-
-          for (const biz of dueFollowUps) {
-            if (!this.isActive) break;
-            if (this.sentToday >= this.config.dailyWhatsAppLimit) break;
-
-            const waState = whatsAppManager.getState();
-            const isWaReady = waState.status === "CONNECTED";
-            const nextStep = (biz.followUpCount ?? 0) + 1;
-
-            let auditData: any = null;
-            try {
-              if (biz.lead?.aiAnalysis) {
-                auditData = JSON.parse(biz.lead.aiAnalysis);
-              }
-            } catch {}
-
-            // Determine channel: Prioritize WhatsApp if connected and phone exists, else Email
-            let channel: "WHATSAPP" | "EMAIL" | null = null;
-            if (isWaReady && biz.phone) {
-              channel = "WHATSAPP";
-            } else if (this.config.enableEmail && biz.email) {
-              channel = "EMAIL";
-            }
-
-            if (!channel) {
-              // Both unavailable right now, postpone by 1 day
-              await prisma.business.update({
-                where: { id: biz.id },
-                data: { nextFollowUpAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
-              }).catch(() => null);
-              continue;
-            }
-
-            const pitch = getFollowUpPitch(auditData, biz, channel, nextStep);
-            let dispatched = false;
-
-            if (channel === "WHATSAPP" && biz.phone) {
-              const sendRes = await whatsAppManager.sendMessage(biz.phone, pitch, biz.city);
-              if (sendRes.success) {
-                dispatched = true;
-                this.sentToday++;
-                this.followUpsSentToday++;
-                this.addLog(
-                  "FOLLOWUP_SENT",
-                  `✅ Sent Follow-up #${nextStep} via WhatsApp to "${biz.name}" (${biz.phone})!`,
-                  biz.name,
-                  biz.phone,
-                  biz.lead?.score
-                );
-              } else {
-                this.addLog(
-                  "FOLLOWUP_ERROR",
-                  `WhatsApp follow-up failed for "${biz.name}": ${sendRes.error}`,
-                  biz.name,
-                  biz.phone
-                );
-              }
-            } else if (channel === "EMAIL" && biz.email) {
-              try {
-                const { subject, body } = EmailService.parseEmailPitch(pitch, biz.name);
-                const emailRes = await EmailService.sendLeadEmail({
-                  to: biz.email,
-                  subject,
-                  body,
-                  leadId: biz.id,
-                  businessName: biz.name,
-                });
-                if (emailRes.success) {
-                  dispatched = true;
-                  this.emailsSentToday++;
-                  this.followUpsSentToday++;
-                  this.addLog(
-                    "FOLLOWUP_SENT",
-                    `📧 Sent Follow-up #${nextStep} via Email to "${biz.name}" (${biz.email})!`,
-                    biz.name,
-                    undefined,
-                    biz.lead?.score
-                  );
-                } else {
-                  this.addLog(
-                    "FOLLOWUP_ERROR",
-                    `Email follow-up failed for "${biz.name}": ${emailRes.error}`,
-                    biz.name
-                  );
-                }
-              } catch (err: any) {
-                this.addLog(
-                  "FOLLOWUP_ERROR",
-                  `Email follow-up error for "${biz.name}": ${err.message}`,
-                  biz.name
-                );
-              }
-            }
-
-            if (dispatched) {
-              const nextFollowUpAt =
-                nextStep < this.config.maxFollowUps
-                  ? new Date(Date.now() + this.config.followUpIntervalDays * 24 * 60 * 60 * 1000)
-                  : null; // Final touch reached
-
-              await prisma.business.update({
-                where: { id: biz.id },
-                data: {
-                  lastContactedAt: new Date(),
-                  followUpCount: nextStep,
-                  nextFollowUpAt,
-                },
-              });
-
-              await (prisma as any).outreachLog.create({
-                data: {
-                  businessId: biz.id,
-                  channel,
-                  step: nextStep,
-                  message: pitch,
-                  status: "SENT",
-                },
-              }).catch(() => null);
-
-              // Jitter delay between follow-ups
-              const delaySec = Math.floor(
-                Math.random() * (this.config.maxDelaySeconds - this.config.minDelaySeconds + 1) +
-                  this.config.minDelaySeconds
-              );
-              this.addLog("INFO", `Follow-up pacing delay: waiting ${delaySec}s before next action...`);
-              await new Promise((res) => setTimeout(res, delaySec * 1000));
-            }
-          }
-        }
-      } catch (fErr: any) {
-        this.addLog("INFO", `Follow-up check notice: ${fErr.message}`);
-      }
+      state.queueStats = queueStats;
+      state.activeQueue = activeQueue;
+      state.pendingFollowUpsDue = dueFollowUps;
+    } catch (err: any) {
+      console.warn("Error fetching async state:", err.message);
     }
+    return state;
+  }
 
-    // ══════════════════════════════════════════════════════════════════════
-    // 4. PHASE 2: NEW LEAD DISCOVERY & INITIAL OUTREACH
-    // ══════════════════════════════════════════════════════════════════════
-    const activeQueues = this.targetQueues.filter((q) => q.enabled);
-    if (activeQueues.length === 0) {
-      this.addLog("INFO", "No active target search queues configured. Add a search target to proceed.");
+  public updateConfig(newConfig: Partial<AutoPilotConfig>, newQueues?: TargetCampaign[]) {
+    this.config = { ...this.config, ...newConfig };
+    if (newQueues) {
+      CampaignSweeper.setCampaigns(newQueues);
+    }
+    this.saveState();
+    this.addLog("INFO", "Auto-Pilot configuration & campaign targets updated.");
+  }
+
+  public start(): void {
+    if (this.isRunning) {
+      console.log("[AutoPilotEngine] Already running.");
       return;
     }
 
-    const currentTarget = activeQueues[this.currentQueueIndex % activeQueues.length];
-    this.currentQueueIndex++;
-    this.lastRunAt = new Date().toISOString();
+    this.isRunning = true;
+    this.stopRequested = false;
+    this.status = "RUNNING";
+    this.addLog("INFO", "🚀 Autonomous Auto-Pilot Loop Engine started.");
 
-    this.addLog("DISCOVERY", `Searching market for "${currentTarget.keyword}" in "${currentTarget.location}"...`);
+    // Launch background worker loop
+    this.loopPromise = this.runAutonomousLoop();
+  }
 
-    try {
-      // 5. Run Lead Discovery & Qualification
-      const result = await LeadService.discoverAndIngest(currentTarget.keyword, currentTarget.location, 15);
-      this.addLog(
-        "DISCOVERY",
-        `Discovery finished: ${result.totalFound} found (${result.newLeadsCreated} new, ${result.duplicatesSkipped} updated).`
-      );
+  public pause(): void {
+    this.stopRequested = true;
+    this.isRunning = false;
+    this.status = "PAUSED";
+    this.delayRemainingSeconds = 0;
+    this.addLog("INFO", "⏸️ Auto-Pilot Outbound Agent paused.");
+  }
 
-      // 6. Query candidate leads from database ready for outreach (either phone or email)
-      const candidateLeads = await prisma.business.findMany({
-        where: {
-          city: currentTarget.location,
-          OR: [
-            { phone: { not: null } },
-            { email: { not: null } },
-          ],
-          status: { in: ["NEW", "QUALIFIED"] },
-          lead: {
-            score: { gte: this.config.minimumScore },
-          },
-        },
-        include: { lead: true },
-        take: 10,
-      });
+  public stop(): void {
+    this.pause();
+  }
 
-      if (candidateLeads.length === 0) {
-        this.addLog("INFO", `No uncontacted leads with Score >= ${this.config.minimumScore} in ${currentTarget.location}.`);
-        return;
-      }
+  /**
+   * The core persistent autonomous worker loop.
+   * Continually runs while isRunning === true, resilient to unhandled errors.
+   */
+  private async runAutonomousLoop(): Promise<void> {
+    console.log("[AutoPilotEngine] Worker loop initiated.");
 
-      this.addLog("INFO", `Found ${candidateLeads.length} high-priority prospects ready for AI audit & outreach.`);
+    while (this.isRunning && !this.stopRequested) {
+      try {
+        this.checkDailyReset();
 
-      // 7. Iterate through candidate leads with human pacing
-      for (const biz of candidateLeads) {
-        if (!this.isActive) break;
-
-        const waState = whatsAppManager.getState();
-        const isWaReady = waState.status === "CONNECTED";
-
-        // Check if both channels are unavailable
-        if (!isWaReady && !this.config.enableEmail) {
+        // 1. Quota Check
+        if (this.sentToday >= this.config.dailyWhatsAppLimit) {
+          this.status = "DAILY_QUOTA_REACHED";
           this.addLog(
-            "WHATSAPP_ERROR",
-            "WhatsApp is not connected and Auto-Email is disabled! Connect WhatsApp or enable Email to proceed.",
+            "INFO",
+            `Daily limit of ${this.config.dailyWhatsAppLimit} messages reached for today (${this.sentToday} sent). Sleeping 5 mins.`
+          );
+          await this.sleep(300000);
+          continue;
+        }
+
+        // 2. Working Hours Check
+        if (!this.isWithinWorkingHours()) {
+          this.status = "WORK_HOURS_PAUSED";
+          this.addLog(
+            "INFO",
+            `Outside active business hours (${this.config.startHour}:00 - ${this.config.endHour}:00). Sleeping 10 mins.`
+          );
+          await this.sleep(600000);
+          continue;
+        }
+
+        // 3. PRIORITY: Due Multi-Touch Follow-Up Dispatch
+        if (this.config.enableFollowUps) {
+          const dispatchedFollowUp = await this.checkAndDispatchFollowUp();
+          if (dispatchedFollowUp) {
+            // Apply humanized delay after follow-up send
+            await this.applyJitterDelay();
+            continue;
+          }
+        }
+
+        // 4. Dynamic Auto-Replenishment Check
+        const stats = await QueueManager.getQueueStats();
+        if (stats.pending <= this.config.autoReplenishThreshold) {
+          this.addLog(
+            "DISCOVERY",
+            `Queue running low (${stats.pending} pending). Triggering campaign market sweep...`
+          );
+          const sweep = await CampaignSweeper.sweepNextCampaign(15);
+          if (sweep && sweep.enqueuedCount > 0) {
+            this.addLog(
+              "QUEUE_ENQUEUED",
+              `Sweep enriched queue: added ${sweep.enqueuedCount} new leads from "${sweep.campaign.keyword}" in "${sweep.campaign.location}".`
+            );
+          }
+        }
+
+        // 5. Pop Next Lead from Queue
+        const nextItem = await QueueManager.popNextLead();
+        if (!nextItem) {
+          this.status = "IDLE";
+          // No items ready, sleep briefly before checking queue again
+          await this.sleep(15000);
+          continue;
+        }
+
+        // 6. Mutex Step Lock & JIT Pipeline Execution
+        this.isProcessingStep = true;
+        this.status = "RUNNING";
+        this.lastRunAt = new Date().toISOString();
+
+        const biz = nextItem.business;
+        this.addLog(
+          "AUDIT",
+          `Processing queued prospect "${biz.name}" (${biz.city}) via JIT AI Pipeline...`,
+          biz.name,
+          biz.phone || undefined,
+          biz.lead?.score
+        );
+
+        const result = await LeadPipeline.processAndDispatch(biz.id, {
+          enableEmail: this.config.enableEmail,
+          followUpIntervalDays: this.config.followUpIntervalDays,
+        });
+
+        if (result.success && !result.skipped) {
+          if (result.channel === "WHATSAPP") {
+            this.sentToday++;
+            this.addLog(
+              "WHATSAPP_SENT",
+              `✅ Sent personalized pitch via WhatsApp to "${biz.name}" (${result.phone})!`,
+              biz.name,
+              result.phone || undefined,
+              biz.lead?.score
+            );
+          } else if (result.channel === "EMAIL") {
+            this.emailsSentToday++;
+            this.addLog(
+              "EMAIL_SENT",
+              `📧 Sent cold pitch via Email to "${biz.name}" (${result.email})!`,
+              biz.name,
+              undefined,
+              biz.lead?.score
+            );
+          }
+          this.saveState();
+          // 7. Humanized Anti-Ban Jitter Delay
+          await this.applyJitterDelay();
+        } else if (result.skipped) {
+          this.addLog(
+            "SKIPPED",
+            `Skipped "${biz.name}": ${result.error || "Already handled"}`,
+            biz.name
+          );
+          // Brief pause between skipped items
+          await this.sleep(2000);
+        } else {
+          // Failed
+          const logType = result.channel === "EMAIL" ? "EMAIL_ERROR" : "WHATSAPP_ERROR";
+          this.addLog(
+            logType,
+            `Failed outreach for "${biz.name}": ${result.error}`,
             biz.name,
             biz.phone || undefined
           );
-          break;
+          await this.sleep(5000);
         }
 
-        // Connection stabilization: don't send messages within 10s of connecting
-        if (isWaReady && waState.lastConnectedAt) {
-          const connectedAgo = Date.now() - new Date(waState.lastConnectedAt).getTime();
-          if (connectedAgo < 10000) {
-            const waitMs = 10000 - connectedAgo;
-            this.addLog("INFO", `WhatsApp just connected ${Math.round(connectedAgo / 1000)}s ago. Stabilizing for ${Math.round(waitMs / 1000)}s...`);
-            await new Promise((res) => setTimeout(res, waitMs));
-          }
-        }
+      } catch (err: any) {
+        console.error("[AutoPilotEngine Loop Error]:", err.message);
+        this.addLog("INFO", `Autopilot loop notice: ${err.message}`);
+        await this.sleep(10000);
+      } finally {
+        this.isProcessingStep = false;
+      }
+    }
 
-        // A. Generate Gemini 2.5 Flash Audit and Custom Pitch
-        this.addLog("AUDIT", `Generating Gemini 2.5 Flash custom audit & pitch for "${biz.name}"...`, biz.name);
-        const audit = await generateGeminiAudit({
-          id: biz.id,
-          name: biz.name,
-          category: biz.category,
-          city: biz.city,
-          rating: biz.rating,
-          reviewCount: biz.reviewCount,
-          website: biz.website,
-          phone: biz.phone,
-        });
+    this.isRunning = false;
+    this.status = "PAUSED";
+    console.log("[AutoPilotEngine] Worker loop exited.");
+  }
 
-        // Save audit to database
-        await (prisma.lead.update as any)({
-          where: { businessId: biz.id },
-          data: { aiAnalysis: JSON.stringify(audit) },
+  /**
+   * Pacing with randomized jitter delay to mimic natural human typing & dispatch cadence
+   */
+  private async applyJitterDelay(): Promise<void> {
+    if (!this.isRunning || this.stopRequested) return;
+
+    const min = this.config.minDelaySeconds;
+    const max = this.config.maxDelaySeconds;
+    const delaySec = Math.floor(Math.random() * (max - min + 1) + min);
+
+    this.status = "SLEEPING_DELAY";
+    this.delayRemainingSeconds = delaySec;
+    this.addLog("INFO", `Humanized anti-ban delay: waiting ${delaySec}s before next action...`);
+
+    for (let sec = delaySec; sec > 0; sec--) {
+      if (!this.isRunning || this.stopRequested) break;
+      this.delayRemainingSeconds = sec;
+      await this.sleep(1000);
+    }
+
+    this.delayRemainingSeconds = 0;
+    if (this.isRunning) {
+      this.status = "RUNNING";
+    }
+  }
+
+  /**
+   * Check and dispatch one due multi-touch follow-up
+   */
+  private async checkAndDispatchFollowUp(): Promise<boolean> {
+    try {
+      const now = new Date();
+      const dueBiz = await prisma.business.findFirst({
+        where: {
+          status: "CONTACTED",
+          nextFollowUpAt: { lte: now },
+          followUpCount: { lt: this.config.maxFollowUps },
+        },
+        include: { lead: true },
+      });
+
+      if (!dueBiz) return false;
+
+      const waState = whatsAppManager.getState();
+      const isWaReady = waState.status === "CONNECTED";
+      const nextStep = (dueBiz.followUpCount ?? 0) + 1;
+
+      let channel: "WHATSAPP" | "EMAIL" | null = null;
+      if (isWaReady && dueBiz.phone) {
+        channel = "WHATSAPP";
+      } else if (this.config.enableEmail && dueBiz.email) {
+        channel = "EMAIL";
+      }
+
+      if (!channel) {
+        // Postpone check by 12 hours
+        await prisma.business.update({
+          where: { id: dueBiz.id },
+          data: { nextFollowUpAt: new Date(Date.now() + 12 * 60 * 60 * 1000) },
         }).catch(() => null);
+        return false;
+      }
 
-        const rawPitch = audit.suggestedPitch?.whatsapp;
-        const pitchText = rawPitch ? sanitizePitchText(rawPitch, { name: biz.name, city: biz.city }) : null;
-        if (isWaReady && this.sentToday < this.config.dailyWhatsAppLimit && pitchText && biz.phone) {
-          // B. Send WhatsApp Message
-          const sendRes = await whatsAppManager.sendMessage(biz.phone, pitchText, biz.city);
-
-          if (sendRes.success) {
-            this.sentToday++;
-            const nextFollowUpDate = this.config.enableFollowUps
-              ? new Date(Date.now() + this.config.followUpIntervalDays * 24 * 60 * 60 * 1000)
-              : null;
-
-            await prisma.business.update({
-              where: { id: biz.id },
-              data: {
-                status: "CONTACTED",
-                lastContactedAt: new Date(),
-                followUpCount: 0,
-                nextFollowUpAt: nextFollowUpDate,
-              },
-            });
-
-            await (prisma as any).outreachLog.create({
-              data: {
-                businessId: biz.id,
-                channel: "WHATSAPP",
-                step: 0,
-                message: pitchText,
-                status: "SENT",
-              },
-            }).catch(() => null);
-
-            this.addLog(
-              "WHATSAPP_SENT",
-              `✅ Sent personalized pitch to "${biz.name}" (${biz.phone})!`,
-              biz.name,
-              biz.phone,
-              biz.lead?.score
-            );
-
-            // C. Randomized Human-like Jitter Delay (e.g. 30–60 seconds)
-            const delaySec =
-              Math.floor(
-                Math.random() * (this.config.maxDelaySeconds - this.config.minDelaySeconds + 1) +
-                  this.config.minDelaySeconds
-              );
-            this.addLog(
-              "INFO",
-              `Pacing safety delay: waiting ${delaySec}s before next message...`
-            );
-            await new Promise((res) => setTimeout(res, delaySec * 1000));
-          } else {
-            // If number is not on WhatsApp or invalid, mark lead so AutoPilot won't retry it repeatedly
-            if (sendRes.error?.includes("not registered on WhatsApp") || sendRes.error?.includes("invalid")) {
-              await prisma.business.update({
-                where: { id: biz.id },
-                data: { status: "DISQUALIFIED" },
-              }).catch(() => null);
-            }
-            this.addLog(
-              "WHATSAPP_ERROR",
-              `Skipped "${biz.name}": ${sendRes.error}`,
-              biz.name,
-              biz.phone
-            );
-          }
+      let auditData: any = null;
+      try {
+        if (dueBiz.lead?.aiAnalysis) {
+          auditData = JSON.parse(dueBiz.lead.aiAnalysis);
         }
+      } catch {}
 
-        // B2. Send Cold Email if enabled
-        let targetEmail = biz.email;
-        if (!targetEmail && biz.website && this.config.enableEmail) {
-          try {
-            targetEmail = await EmailScraper.scrapeEmailFromWebsite(biz.website);
-            if (targetEmail) {
-              await prisma.business.update({
-                where: { id: biz.id },
-                data: { email: targetEmail },
-              }).catch(() => null);
-              this.addLog("INFO", `🔍 Auto-scraped public email for "${biz.name}": ${targetEmail}`);
-            }
-          } catch {
-            // ignore scraper error
-          }
+      const pitch = getFollowUpPitch(auditData, dueBiz, channel, nextStep);
+      let dispatched = false;
+
+      if (channel === "WHATSAPP" && dueBiz.phone) {
+        const sendRes = await whatsAppManager.sendMessage(dueBiz.phone, pitch, dueBiz.city);
+        if (sendRes.success) {
+          dispatched = true;
+          this.sentToday++;
+          this.followUpsSentToday++;
+          this.addLog(
+            "FOLLOWUP_SENT",
+            `✅ Sent Follow-up #${nextStep} via WhatsApp to "${dueBiz.name}" (${dueBiz.phone})!`,
+            dueBiz.name,
+            dueBiz.phone,
+            dueBiz.lead?.score
+          );
         }
-
-        if (this.config.enableEmail && targetEmail && audit.suggestedPitch?.email) {
-          try {
-            const { subject, body } = EmailService.parseEmailPitch(audit.suggestedPitch.email, biz.name);
-            const emailRes = await EmailService.sendLeadEmail({
-              to: targetEmail,
-              subject,
-              body,
-              leadId: biz.id,
-              businessName: biz.name,
-            });
-
-            if (emailRes.success) {
-              this.emailsSentToday++;
-              const nextFollowUpDate = this.config.enableFollowUps
-                ? new Date(Date.now() + this.config.followUpIntervalDays * 24 * 60 * 60 * 1000)
-                : null;
-
-              await prisma.business.update({
-                where: { id: biz.id },
-                data: {
-                  status: "CONTACTED",
-                  lastContactedAt: new Date(),
-                  followUpCount: 0,
-                  nextFollowUpAt: nextFollowUpDate,
-                },
-              }).catch(() => null);
-
-              await (prisma as any).outreachLog.create({
-                data: {
-                  businessId: biz.id,
-                  channel: "EMAIL",
-                  step: 0,
-                  message: `Subject: ${subject}\n\n${body}`,
-                  status: "SENT",
-                },
-              }).catch(() => null);
-
-              this.addLog(
-                "EMAIL_SENT",
-                `📧 Sent cold email pitch to "${biz.name}" (${targetEmail})!`,
-                biz.name,
-                undefined,
-                biz.lead?.score
-              );
-            } else {
-              this.addLog(
-                "EMAIL_ERROR",
-                `Failed to email "${biz.name}": ${emailRes.error}`,
-                biz.name
-              );
-            }
-          } catch (emailErr: any) {
-            this.addLog(
-              "EMAIL_ERROR",
-              `Email error for "${biz.name}": ${emailErr.message}`,
-              biz.name
-            );
-          }
+      } else if (channel === "EMAIL" && dueBiz.email) {
+        const { subject, body } = EmailService.parseEmailPitch(pitch, dueBiz.name);
+        const emailRes = await EmailService.sendLeadEmail({
+          to: dueBiz.email,
+          subject,
+          body,
+          leadId: dueBiz.id,
+          businessName: dueBiz.name,
+        });
+        if (emailRes.success) {
+          dispatched = true;
+          this.emailsSentToday++;
+          this.followUpsSentToday++;
+          this.addLog(
+            "FOLLOWUP_SENT",
+            `📧 Sent Follow-up #${nextStep} via Email to "${dueBiz.name}" (${dueBiz.email})!`,
+            dueBiz.name,
+            undefined,
+            dueBiz.lead?.score
+          );
         }
       }
-    } catch (err: any) {
-      this.addLog("INFO", `Auto-Pilot cycle encounter error: ${err.message}`);
+
+      if (dispatched) {
+        const nextFollowUpAt =
+          nextStep < this.config.maxFollowUps
+            ? new Date(Date.now() + this.config.followUpIntervalDays * 24 * 60 * 60 * 1000)
+            : null;
+
+        await prisma.business.update({
+          where: { id: dueBiz.id },
+          data: {
+            lastContactedAt: new Date(),
+            followUpCount: nextStep,
+            nextFollowUpAt,
+          },
+        });
+
+        await prisma.outreachLog.create({
+          data: {
+            businessId: dueBiz.id,
+            channel,
+            step: nextStep,
+            message: pitch,
+            status: "SENT",
+          },
+        }).catch(() => null);
+
+        this.saveState();
+        return true;
+      }
+
+      return false;
+    } catch (e: any) {
+      console.warn("Follow-up dispatch error:", e.message);
+      return false;
     }
+  }
+
+  /**
+   * Run a single step immediately on demand
+   */
+  public async runSingleStep(): Promise<void> {
+    if (this.isProcessingStep) {
+      console.log("[AutoPilotEngine] Step already in progress.");
+      return;
+    }
+
+    const item = await QueueManager.popNextLead();
+    if (!item) {
+      // If queue is empty, trigger one campaign sweep to replenish
+      this.addLog("DISCOVERY", "Queue is empty. Running a manual sweep to replenish...");
+      await CampaignSweeper.sweepNextCampaign(10);
+      const replenishedItem = await QueueManager.popNextLead();
+      if (!replenishedItem) {
+        this.addLog("INFO", "No leads available to process right now.");
+        return;
+      }
+      await this.executeItemStep(replenishedItem);
+      return;
+    }
+
+    await this.executeItemStep(item);
+  }
+
+  private async executeItemStep(item: any) {
+    this.isProcessingStep = true;
+    try {
+      const biz = item.business;
+      this.addLog("AUDIT", `Running instant step for "${biz.name}"...`, biz.name);
+      const res = await LeadPipeline.processAndDispatch(biz.id, {
+        enableEmail: this.config.enableEmail,
+        followUpIntervalDays: this.config.followUpIntervalDays,
+      });
+
+      if (res.success && !res.skipped) {
+        if (res.channel === "WHATSAPP") this.sentToday++;
+        if (res.channel === "EMAIL") this.emailsSentToday++;
+        this.addLog("INFO", `Step finished: dispatched pitch to "${biz.name}" via ${res.channel}.`, biz.name);
+      } else {
+        this.addLog("INFO", `Step completed: ${res.error || "Handled"}`, biz.name);
+      }
+      this.saveState();
+    } finally {
+      this.isProcessingStep = false;
+    }
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private addLog(
@@ -597,7 +632,7 @@ class AutoPilotEngine {
   }
 }
 
-// Global singleton instance — MUST persist in both dev and production
+// Global singleton instance
 const globalForAutoPilot = globalThis as unknown as { autoPilotEngine: AutoPilotEngine };
 if (!globalForAutoPilot.autoPilotEngine) {
   globalForAutoPilot.autoPilotEngine = new AutoPilotEngine();

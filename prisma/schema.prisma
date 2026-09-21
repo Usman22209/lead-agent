@@ -31,6 +31,7 @@ model Business {
 
   lead          Lead?
   outreachLogs  OutreachLog[]
+  queueItem     QueueItem?
 
   @@index([city])
   @@index([category])
@@ -80,4 +81,20 @@ model SearchLog {
   newLeadsCount Int       @default(0)
   status        String    @default("COMPLETED") // COMPLETED, FAILED, RUNNING
   createdAt     DateTime  @default(now())
+}
+
+model QueueItem {
+  id          String    @id @default(cuid())
+  businessId  String    @unique
+  business    Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  priority    Int       @default(0) // Higher = processed first
+  status      String    @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED, SKIPPED
+  retryCount  Int       @default(0)
+  lastError   String?
+  addedAt     DateTime  @default(now())
+  processedAt DateTime?
+
+  @@index([status])
+  @@index([priority])
+  @@index([addedAt])
 }

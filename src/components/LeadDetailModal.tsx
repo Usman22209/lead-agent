@@ -26,6 +26,7 @@ import {
   Clock,
   TrendingUp,
   History,
+  Layers,
 } from "lucide-react";
 import { PriorityBadge } from "./PriorityBadge";
 import { ScoreGauge } from "./ScoreGauge";
@@ -114,6 +115,65 @@ export function LeadDetailModal({
       }
     } catch {} finally {
       setFollowUpLoading(false);
+    }
+  };
+
+  const [isEnqueuing, setIsEnqueuing] = useState(false);
+  const [enqueueSuccess, setEnqueueSuccess] = useState<string | null>(null);
+
+  const handleEnqueueLead = async () => {
+    if (!lead?.id) return;
+    setIsEnqueuing(true);
+    setEnqueueSuccess(null);
+    try {
+      const res = await fetch("/api/autopilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "enqueue", businessId: lead.id, priority: 5 }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setEnqueueSuccess("Added to Autopilot Queue!");
+        setCurrentStatus("QUEUED");
+        if (onStatusChange) onStatusChange(lead.id, "QUEUED");
+      } else {
+        alert(data.error || "Failed to enqueue lead");
+      }
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    } finally {
+      setIsEnqueuing(false);
+    }
+  };
+
+  const [isInstantSending, setIsInstantSending] = useState(false);
+  const [instantSuccess, setInstantSuccess] = useState<string | null>(null);
+
+  const handleInstantOutreach = async () => {
+    if (!lead?.id) return;
+    setIsInstantSending(true);
+    setInstantSuccess(null);
+    try {
+      const res = await fetch(`/api/leads/${lead.id}/instant-outreach`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setInstantSuccess(data.message);
+        setCurrentStatus("CONTACTED");
+        if (onStatusChange) onStatusChange(lead.id, "CONTACTED");
+        if (data.data?.audit) {
+          setAiAudit(data.data.audit);
+        }
+      } else {
+        alert(data.error || "Instant outreach failed");
+      }
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    } finally {
+      setIsInstantSending(false);
     }
   };
 
@@ -817,19 +877,39 @@ export function LeadDetailModal({
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleEnqueueLead}
+              disabled={isEnqueuing || currentStatus === "QUEUED" || currentStatus === "CONTACTED"}
+              className="px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 font-semibold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+              title="Add this prospect to the autonomous Autopilot Queue"
+            >
+              <Layers className="h-3.5 w-3.5" />
+              {currentStatus === "QUEUED" ? "In Queue" : isEnqueuing ? "Queueing..." : "Enqueue"}
+            </button>
+
+            <button
+              onClick={handleInstantOutreach}
+              disabled={isInstantSending}
+              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold flex items-center gap-1.5 shadow-md transition cursor-pointer disabled:opacity-50"
+              title="Run JIT Gemini audit and send personalized outreach immediately"
+            >
+              <Zap className="h-3.5 w-3.5 fill-white" />
+              {isInstantSending ? "Pitching..." : "Instant AI Pitch"}
+            </button>
+
             <a
               href={`/api/export?id=${lead.id}&format=html`}
               target="_blank"
               rel="noreferrer"
-              className="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-white/10 text-slate-300 hover:text-white font-medium flex items-center gap-1.5 transition cursor-pointer"
+              className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-white/10 text-slate-300 hover:text-white font-medium flex items-center gap-1.5 transition cursor-pointer"
               title="Open printable executive dossier for this lead"
             >
               <FileText className="h-3.5 w-3.5 text-indigo-400" />
-              Print Dossier
+              Dossier
             </a>
             <button
               onClick={onClose}
-              className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition cursor-pointer"
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition cursor-pointer"
             >
               Close
             </button>
@@ -838,10 +918,10 @@ export function LeadDetailModal({
                 href={`https://wa.me/${lead.phone.replace(/[^0-9]/g, "")}`}
                 target="_blank"
                 rel="noreferrer"
-                className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1.5 transition cursor-pointer"
               >
                 <MessageSquare className="h-3.5 w-3.5" />
-                Open WhatsApp
+                WhatsApp
               </a>
             )}
           </div>
