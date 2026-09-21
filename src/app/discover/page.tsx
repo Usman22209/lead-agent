@@ -54,6 +54,13 @@ function DiscoveryContent() {
   const [error, setError] = useState<string | null>(null);
   const [selectedLead, setSelectedLead] = useState<any | null>(null);
 
+  // Queue actions state
+  const [enqueuedIds, setEnqueuedIds] = useState<Set<string>>(new Set());
+  const [isEnqueuingAll, setIsEnqueuingAll] = useState(false);
+  const [enqueuingId, setEnqueuingId] = useState<string | null>(null);
+  const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
+  const [queueMessage, setQueueMessage] = useState<string | null>(null);
+
   const resultsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -103,7 +110,101 @@ function DiscoveryContent() {
 
   const handleScan = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    setSelectedLeadIds([]);
+    setQueueMessage(null);
     executeDiscovery(keyword, location, limit);
+  };
+
+  const handleEnqueueOne = async (leadId: string) => {
+    setEnqueuingId(leadId);
+    setQueueMessage(null);
+    try {
+      const res = await fetch("/api/autopilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "enqueue", businessId: leadId, priority: 2 }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setEnqueuedIds((prev) => new Set([...prev, leadId]));
+        setQueueMessage("Lead successfully added to Autopilot Queue!");
+        setTimeout(() => setQueueMessage(null), 4000);
+      } else {
+        alert(data.error || "Failed to enqueue lead");
+      }
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    } finally {
+      setEnqueuingId(null);
+    }
+  };
+
+  const handleEnqueueAll = async () => {
+    if (!scanResult?.leads || scanResult.leads.length === 0) return;
+    const allIds = scanResult.leads.map((l: any) => l.id);
+    setIsEnqueuingAll(true);
+    setQueueMessage(null);
+    try {
+      const res = await fetch("/api/autopilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "enqueue", businessIds: allIds, priority: 2 }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setEnqueuedIds(new Set([...enqueuedIds, ...allIds]));
+        setSelectedLeadIds([]);
+        setQueueMessage(`Successfully added all ${allIds.length} leads to Autopilot Queue!`);
+        setTimeout(() => setQueueMessage(null), 5000);
+      } else {
+        alert(data.error || "Failed to enqueue leads");
+      }
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    } finally {
+      setIsEnqueuingAll(false);
+    }
+  };
+
+  const handleEnqueueSelected = async () => {
+    if (selectedLeadIds.length === 0) return;
+    setIsEnqueuingAll(true);
+    setQueueMessage(null);
+    try {
+      const res = await fetch("/api/autopilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "enqueue", businessIds: selectedLeadIds, priority: 2 }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setEnqueuedIds(new Set([...enqueuedIds, ...selectedLeadIds]));
+        setQueueMessage(`Added ${selectedLeadIds.length} selected leads to Autopilot Queue!`);
+        setSelectedLeadIds([]);
+        setTimeout(() => setQueueMessage(null), 4000);
+      } else {
+        alert(data.error || "Failed to enqueue selected leads");
+      }
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    } finally {
+      setIsEnqueuingAll(false);
+    }
+  };
+
+  const handleToggleSelectAll = () => {
+    if (!scanResult?.leads) return;
+    if (selectedLeadIds.length === scanResult.leads.length) {
+      setSelectedLeadIds([]);
+    } else {
+      setSelectedLeadIds(scanResult.leads.map((l: any) => l.id));
+    }
+  };
+
+  const handleToggleSelectLead = (id: string) => {
+    setSelectedLeadIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
   };
 
   return (
@@ -298,16 +399,75 @@ function DiscoveryContent() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={handleEnqueueAll}
+                    disabled={isEnqueuingAll || (scanResult.leads.length > 0 && scanResult.leads.every((l: any) => enqueuedIds.has(l.id)))}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition cursor-pointer disabled:opacity-50"
+                    title="Add all discovered leads into the autonomous Autopilot Queue"
+                  >
+                    <Layers className="h-3.5 w-3.5" />
+                    <span>
+                      {isEnqueuingAll
+                        ? "Adding All to Queue..."
+                        : scanResult.leads.length > 0 && scanResult.leads.every((l: any) => enqueuedIds.has(l.id))
+                        ? "All Leads In Queue ✓"
+                        : `Add All (${scanResult.leads.length}) to Queue`}
+                    </span>
+                  </button>
+
+                  <Link
+                    href="/autopilot"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-950/60 hover:bg-purple-900/60 border border-purple-500/30 text-purple-300 text-xs font-semibold transition cursor-pointer"
+                  >
+                    <span>Autopilot Hub</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+
                   <button
                     onClick={() => router.push(`/leads?city=${encodeURIComponent(location)}`)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-white/10 text-white text-xs font-semibold transition cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-white/10 text-slate-300 text-xs font-semibold transition cursor-pointer"
                   >
-                    <span>Open Pipeline Table</span>
-                    <ArrowRight className="h-3.5 w-3.5" />
+                    <span>Pipeline</span>
                   </button>
                 </div>
               </div>
+
+              {/* Queue Status Notification Toast */}
+              {queueMessage && (
+                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center justify-between animate-fadeIn">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400 flex-shrink-0" />
+                    <span>{queueMessage}</span>
+                  </div>
+                  <Link
+                    href="/autopilot"
+                    className="font-bold underline text-emerald-300 hover:text-white text-[11px] flex items-center gap-1"
+                  >
+                    View Autopilot Queue <ArrowRight className="h-3 w-3" />
+                  </Link>
+                </div>
+              )}
+
+              {/* Bulk Selection Bar */}
+              {selectedLeadIds.length > 0 && (
+                <div className="p-2.5 rounded-lg bg-indigo-950/60 border border-indigo-500/30 flex items-center justify-between text-xs animate-fadeIn">
+                  <div className="flex items-center gap-2 text-indigo-200">
+                    <span className="px-1.5 py-0.5 rounded bg-indigo-500/30 text-indigo-300 font-mono font-bold text-[11px]">
+                      {selectedLeadIds.length}
+                    </span>
+                    <span>leads selected</span>
+                  </div>
+                  <button
+                    onClick={handleEnqueueSelected}
+                    disabled={isEnqueuingAll}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition cursor-pointer disabled:opacity-50"
+                  >
+                    <Layers className="h-3.5 w-3.5" />
+                    <span>Enqueue Selected ({selectedLeadIds.length})</span>
+                  </button>
+                </div>
+              )}
 
               {/* Results Table */}
               <div className="rounded-xl overflow-hidden border border-white/[0.07] bg-[#0d1322]">
@@ -322,78 +482,139 @@ function DiscoveryContent() {
                   <table className="w-full text-left text-xs">
                     <thead className="bg-[#090d16] text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-white/5">
                       <tr>
-                        <th className="py-3 px-4">Score & Priority</th>
-                        <th className="py-3 px-4">Business Name & Category</th>
-                        <th className="py-3 px-4">Rating & Reviews</th>
-                        <th className="py-3 px-4">Website</th>
-                        <th className="py-3 px-4">Phone</th>
-                        <th className="py-3 px-4 text-right">Action</th>
+                        <th className="py-3 px-3 w-8 text-center">
+                          <input
+                            type="checkbox"
+                            checked={
+                              scanResult.leads.length > 0 &&
+                              selectedLeadIds.length === scanResult.leads.length
+                            }
+                            onChange={handleToggleSelectAll}
+                            className="rounded bg-slate-800 border-white/20 text-indigo-600 focus:ring-0 cursor-pointer"
+                          />
+                        </th>
+                        <th className="py-3 px-3">Score & Priority</th>
+                        <th className="py-3 px-3">Business Name & Category</th>
+                        <th className="py-3 px-3">Rating & Reviews</th>
+                        <th className="py-3 px-3">Website</th>
+                        <th className="py-3 px-3">Phone</th>
+                        <th className="py-3 px-3 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5 text-slate-300">
-                      {scanResult.leads.map((lead: any) => (
-                        <tr key={lead.id} className="hover:bg-white/[0.02] transition">
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
-                              <ScoreGauge score={lead.score} size="md" />
-                              <PriorityBadge priority={lead.priority} size="sm" />
-                            </div>
-                          </td>
+                      {scanResult.leads.map((lead: any) => {
+                        const isEnqueued = enqueuedIds.has(lead.id);
+                        const isThisEnqueuing = enqueuingId === lead.id;
+                        const isSelected = selectedLeadIds.includes(lead.id);
 
-                          <td className="py-3 px-4 max-w-xs">
-                            <div className="font-bold text-white truncate">{lead.name}</div>
-                            <div className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5 truncate">
-                              <span>{lead.category}</span>
-                              <span>•</span>
-                              <span className="flex items-center gap-0.5 text-slate-300">
-                                <MapPin className="h-3 w-3 text-slate-400" />
-                                {lead.city}
-                              </span>
-                            </div>
-                          </td>
+                        return (
+                          <tr
+                            key={lead.id}
+                            className={`hover:bg-white/[0.02] transition ${
+                              isSelected ? "bg-indigo-500/5" : ""
+                            }`}
+                          >
+                            <td className="py-3 px-3 text-center">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleToggleSelectLead(lead.id)}
+                                className="rounded bg-slate-800 border-white/20 text-indigo-600 focus:ring-0 cursor-pointer"
+                              />
+                            </td>
 
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-1 text-amber-400 font-medium">
-                              <Star className="h-3.5 w-3.5 fill-amber-400" />
-                              <span>{lead.rating?.toFixed(1) || "0.0"}</span>
-                              <span className="text-slate-500 font-normal">({lead.reviewCount})</span>
-                            </div>
-                          </td>
+                            <td className="py-3 px-3">
+                              <div className="flex items-center gap-2">
+                                <ScoreGauge score={lead.score} size="md" />
+                                <PriorityBadge priority={lead.priority} size="sm" />
+                              </div>
+                            </td>
 
-                          <td className="py-3 px-4">
-                            {lead.hasWebsite && lead.website ? (
-                              <a
-                                href={lead.website.startsWith("http") ? lead.website : `https://${lead.website}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1.5 text-blue-400 hover:text-blue-300 hover:underline text-xs font-medium max-w-[150px] truncate"
-                              >
-                                <Globe className="h-3.5 w-3.5 flex-shrink-0" />
-                                <span className="truncate">{lead.website.replace(/^https?:\/\/(www\.)?/, "")}</span>
-                                <ExternalLink className="h-3 w-3 flex-shrink-0 opacity-70" />
-                              </a>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 text-rose-400 font-semibold px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-[10px]">
-                                <XCircle className="h-3 w-3" /> No Website
-                              </span>
-                            )}
-                          </td>
+                            <td className="py-3 px-3 max-w-xs">
+                              <div className="font-bold text-white truncate">{lead.name}</div>
+                              <div className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5 truncate">
+                                <span>{lead.category}</span>
+                                <span>•</span>
+                                <span className="flex items-center gap-0.5 text-slate-300">
+                                  <MapPin className="h-3 w-3 text-slate-400" />
+                                  {lead.city}
+                                </span>
+                              </div>
+                            </td>
 
-                          <td className="py-3 px-4 font-mono text-[11px] text-slate-300">
-                            {lead.phone || <span className="text-slate-500">Not listed</span>}
-                          </td>
+                            <td className="py-3 px-3">
+                              <div className="flex items-center gap-1 text-amber-400 font-medium">
+                                <Star className="h-3.5 w-3.5 fill-amber-400" />
+                                <span>{lead.rating?.toFixed(1) || "0.0"}</span>
+                                <span className="text-slate-500 font-normal">({lead.reviewCount})</span>
+                              </div>
+                            </td>
 
-                          <td className="py-3 px-4 text-right">
-                            <Link
-                              href={`/leads/${lead.id}`}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 text-xs font-semibold border border-indigo-500/20 transition cursor-pointer"
-                            >
-                              <span>Inspect Details</span>
-                              <ArrowRight className="h-3 w-3" />
-                            </Link>
-                          </td>
-                        </tr>
-                      ))}
+                            <td className="py-3 px-3">
+                              {lead.hasWebsite && lead.website ? (
+                                <a
+                                  href={lead.website.startsWith("http") ? lead.website : `https://${lead.website}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1.5 text-blue-400 hover:text-blue-300 hover:underline text-xs font-medium max-w-[150px] truncate"
+                                >
+                                  <Globe className="h-3.5 w-3.5 flex-shrink-0" />
+                                  <span className="truncate">{lead.website.replace(/^https?:\/\/(www\.)?/, "")}</span>
+                                  <ExternalLink className="h-3 w-3 flex-shrink-0 opacity-70" />
+                                </a>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-rose-400 font-semibold px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-[10px]">
+                                  <XCircle className="h-3 w-3" /> No Website
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="py-3 px-3 font-mono text-[11px] text-slate-300">
+                              {lead.phone || <span className="text-slate-500">Not listed</span>}
+                            </td>
+
+                            <td className="py-3 px-3 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => handleEnqueueOne(lead.id)}
+                                  disabled={isEnqueued || isThisEnqueuing}
+                                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer ${
+                                    isEnqueued
+                                      ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 cursor-default"
+                                      : "bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30"
+                                  }`}
+                                  title="Add lead into Autopilot Queue"
+                                >
+                                  {isEnqueued ? (
+                                    <>
+                                      <Check className="h-3 w-3 text-emerald-400" />
+                                      <span>In Queue</span>
+                                    </>
+                                  ) : isThisEnqueuing ? (
+                                    <>
+                                      <RefreshCw className="h-3 w-3 animate-spin" />
+                                      <span>Adding...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Layers className="h-3 w-3" />
+                                      <span>Add to Queue</span>
+                                    </>
+                                  )}
+                                </button>
+
+                                <button
+                                  onClick={() => setSelectedLead(lead)}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-semibold border border-white/10 transition cursor-pointer"
+                                >
+                                  <span>Inspect</span>
+                                  <ArrowRight className="h-3 w-3" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
