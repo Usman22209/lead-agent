@@ -85,3 +85,5 @@ Thumbs.db
 
 # Vercel & Deployments
 .vercel
+
+ssh-key-*
