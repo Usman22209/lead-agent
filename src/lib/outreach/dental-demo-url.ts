@@ -1,19 +1,18 @@
 /**
- * Dental Demo Site URL Generator
+ * Dental Demo Site URL Generator (Strictly for Dentists & Dental Clinics)
  *
  * Constructs a fully personalized preview URL for the dynamic dental site
  * (dental-site-sage.vercel.app) using the lead's real business data.
  *
- * The dental site reads all clinic info from URL query parameters and renders
- * a premium, fully-branded patient portal on-the-fly — zero manual coding.
+ * NOTE: Strictly restricted to dentists, dental practices, orthodontists, etc.
+ * Normal hospitals, general medical clinics, doctors, spas, salons, and gyms
+ * are strictly EXCLUDED and must use standard website audit outreach.
  */
 
 const DENTAL_SITE_BASE_URL = "https://dental-site-sage.vercel.app";
 
 /**
- * Strict keywords that identify a dental practice.
- * ONLY dental clinics, dentists, orthodontists, etc. match.
- * General clinics, doctors, hospitals, spas, salons, and gyms are explicitly excluded.
+ * Strict keywords that specifically identify a dental / dentist practice.
  */
 const STRICT_DENTAL_KEYWORDS = [
   "dentist",
@@ -22,19 +21,24 @@ const STRICT_DENTAL_KEYWORDS = [
   "endodont",
   "periodont",
   "prosthodont",
-  "tooth",
-  "teeth",
-  "implantolog",
-  "maxillofacial",
-  "oral surgeon",
-  "oral surgery",
+  "teeth whitening",
+  "dental implant",
+  "dental clinic",
+  "dental center",
+  "dental centre",
+  "dental care",
+  "dental practice",
+  "dental surgery",
+  "cosmetic dentist",
+  "pediatric dentist",
+  "family dentist",
 ];
 
 /**
- * Check if a business is strictly a dental practice.
- * Returns false for all other categories (gyms, salons, medical clinics, hospitals, spas, etc.)
+ * Check if a business is strictly a dental/dentist practice.
+ * Returns FALSE for normal hospitals, medical clinics, doctors, polyclinics, spas, gyms, etc.
  */
-export function isDentalOrMedicalBusiness(
+export function isDentalOnlyBusiness(
   category?: string | null,
   name?: string | null
 ): boolean {
@@ -44,7 +48,7 @@ export function isDentalOrMedicalBusiness(
   // If no category and no name, return false
   if (!cat && !n) return false;
 
-  // Exclude veterinary / pet clinics
+  // 1. Reject veterinary, animal, or pet clinics
   if (
     cat.includes("veterin") ||
     n.includes("veterin") ||
@@ -56,12 +60,58 @@ export function isDentalOrMedicalBusiness(
     return false;
   }
 
-  // Check category against strict dental keywords
+  // 2. Reject normal hospitals, medical clinics, and doctors unless explicitly a dental clinic
+  const isGeneralHospitalOrMedical =
+    cat === "hospital" ||
+    cat === "general hospital" ||
+    cat === "medical clinics" ||
+    cat === "medical clinic" ||
+    cat === "medical center" ||
+    cat === "medical centre" ||
+    cat === "doctor" ||
+    cat === "physician" ||
+    cat === "polyclinic" ||
+    cat === "health clinic" ||
+    cat === "health center" ||
+    cat === "urgent care" ||
+    cat === "emergency room";
+
+  const hasDentalInCat =
+    cat.includes("dentist") ||
+    cat.includes("dental") ||
+    cat.includes("orthodont") ||
+    cat.includes("endodont") ||
+    cat.includes("periodont") ||
+    cat.includes("prosthodont");
+
+  const hasDentalInName =
+    n.includes("dentist") ||
+    n.includes("dental") ||
+    n.includes("orthodont") ||
+    n.includes("endodont") ||
+    n.includes("periodont") ||
+    n.includes("prosthodont");
+
+  // If category is a normal hospital/medical clinic and category doesn't specify dental:
+  if (isGeneralHospitalOrMedical && !hasDentalInCat) {
+    return false;
+  }
+
+  // Normal hospitals (e.g. "American Hospital Dubai", "Mediclinic City Hospital", "Zulekha Hospital") must be rejected
+  if (n.includes("hospital") && !n.includes("dental hospital")) {
+    return false;
+  }
+
+  // General medical centers / clinics without dental in their name or category
+  if (!hasDentalInCat && !hasDentalInName) {
+    return false;
+  }
+
+  // Match against strict dental keywords
   if (STRICT_DENTAL_KEYWORDS.some((kw) => cat.includes(kw))) {
     return true;
   }
 
-  // Check business name (e.g. "Smile Studio Dental", "Karama Dental Center")
   if (STRICT_DENTAL_KEYWORDS.some((kw) => n.includes(kw))) {
     return true;
   }
@@ -69,7 +119,8 @@ export function isDentalOrMedicalBusiness(
   return false;
 }
 
-export const isDentalBusiness = isDentalOrMedicalBusiness;
+export const isDentalOrMedicalBusiness = isDentalOnlyBusiness;
+export const isDentalBusiness = isDentalOnlyBusiness;
 
 /**
  * Auto-detect regulatory license text based on city/country
@@ -77,36 +128,36 @@ export const isDentalBusiness = isDentalOrMedicalBusiness;
 function detectLicense(city: string): string {
   const c = city.toLowerCase();
   if (["dubai", "abu dhabi", "sharjah", "ajman", "al ain", "ras al khaimah", "fujairah"].some((x) => c.includes(x))) {
-    return "DHA Licensed Facility";
+    return "DHA Licensed Dental Practice";
   }
   if (["london", "manchester", "birmingham", "leeds", "glasgow", "edinburgh", "liverpool", "bristol"].some((x) => c.includes(x))) {
-    return "GDC Registered";
+    return "GDC Registered Dental Practice";
   }
   if (["new york", "los angeles", "chicago", "houston", "miami", "dallas", "san francisco", "austin", "boston", "seattle"].some((x) => c.includes(x))) {
     return "ADA Certified Practice";
   }
   if (["toronto", "vancouver", "montreal", "calgary", "ottawa"].some((x) => c.includes(x))) {
-    return "RCDSO Licensed";
+    return "RCDSO Licensed Dental Practice";
   }
   if (["sydney", "melbourne", "brisbane", "perth", "adelaide"].some((x) => c.includes(x))) {
-    return "AHPRA Registered";
+    return "AHPRA Registered Dental Practice";
   }
   if (["singapore"].some((x) => c.includes(x))) {
-    return "MOH Licensed Facility";
+    return "MOH Licensed Dental Facility";
   }
   if (["tokyo", "osaka"].some((x) => c.includes(x))) {
-    return "MHLW Certified";
+    return "MHLW Certified Practice";
   }
   if (["lahore", "karachi", "islamabad", "rawalpindi", "faisalabad", "peshawar"].some((x) => c.includes(x))) {
-    return "PMC Verified Facility";
+    return "PMC Verified Dental Facility";
   }
   if (["riyadh", "jeddah", "dammam", "mecca", "medina"].some((x) => c.includes(x))) {
-    return "MOH Licensed Facility";
+    return "MOH Licensed Dental Facility";
   }
   if (["doha"].some((x) => c.includes(x))) {
-    return "MOPH Licensed";
+    return "MOPH Licensed Dental Facility";
   }
-  return "Licensed & Accredited Facility";
+  return "Licensed & Accredited Dental Practice";
 }
 
 /**

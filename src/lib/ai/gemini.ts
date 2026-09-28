@@ -263,9 +263,9 @@ Your job is to analyze local businesses found on Google Maps, diagnose their dig
     isDental
       ? `
 
-CRITICAL CONTEXT — DENTAL/MEDICAL DEMO SITE ENGINE:
+CRITICAL CONTEXT — DENTAL CLINIC DEMO SITE ENGINE:
 We have a live, ultra-premium dental patient portal that generates personalized clinic websites on-the-fly.
-A custom demo has ALREADY been generated for this clinic. The live preview URL is:
+A custom demo has ALREADY been generated for this dental clinic. The live preview URL is:
 ${demoUrl}
 
 This demo site features:
