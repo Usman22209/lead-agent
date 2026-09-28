@@ -243,8 +243,8 @@ export async function runGeminiLeadAnalysis(
   business: RawBusinessLead,
   apiKey?: string
 ): Promise<GeminiAuditResult> {
-  // Check if this is a dental/medical business and generate demo URL
-  const isDental = isDentalOrMedicalBusiness(business.category || "");
+  // Check if this is strictly a dental business and generate demo URL
+  const isDental = isDentalOrMedicalBusiness(business.category, business.name);
   const demoUrl = isDental
     ? generateDentalDemoUrl({
         name: business.name,
@@ -394,8 +394,8 @@ function generateFallbackAudit(business: RawBusinessLead): GeminiAuditResult {
   const reviews = business.reviewCount || 0;
   const rating = business.rating || 0;
 
-  // Generate dental demo URL if applicable
-  const isDental = isDentalOrMedicalBusiness(business.category || "");
+  // Generate dental demo URL strictly for dental practices only
+  const isDental = isDentalOrMedicalBusiness(business.category, business.name);
   const demoUrl = isDental
     ? generateDentalDemoUrl({
         name: business.name,

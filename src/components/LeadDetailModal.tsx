@@ -217,7 +217,7 @@ export function LeadDetailModal({
     reasons = [];
   }
 
-  const isDental = isDentalOrMedicalBusiness(lead.category || "");
+  const isDental = isDentalOrMedicalBusiness(lead.category, lead.name);
   const demoSiteUrl = isDental
     ? generateDentalDemoUrl({
         name: lead.name,

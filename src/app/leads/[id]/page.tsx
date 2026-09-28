@@ -384,7 +384,7 @@ export default function LeadDetailPage({
             <span>Print Dossier</span>
           </a>
 
-          {isDentalOrMedicalBusiness(lead.category || "") && (
+          {isDentalOrMedicalBusiness(lead.category, lead.name) && (
             <a
               href={generateDentalDemoUrl({
                 name: lead.name,

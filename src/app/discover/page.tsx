@@ -617,7 +617,7 @@ function DiscoveryContent() {
                                   <ArrowRight className="h-3 w-3" />
                                 </button>
 
-                                {isDentalOrMedicalBusiness(lead.category || "") && (
+                                {isDentalOrMedicalBusiness(lead.category, lead.name) && (
                                   <a
                                     href={generateDentalDemoUrl({
                                       name: lead.name,

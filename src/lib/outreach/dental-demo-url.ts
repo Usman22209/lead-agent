@@ -11,25 +11,65 @@
 const DENTAL_SITE_BASE_URL = "https://dental-site-sage.vercel.app";
 
 /**
- * Categories/keywords that indicate a dental or medical clinic
+ * Strict keywords that identify a dental practice.
+ * ONLY dental clinics, dentists, orthodontists, etc. match.
+ * General clinics, doctors, hospitals, spas, salons, and gyms are explicitly excluded.
  */
-const DENTAL_KEYWORDS = [
-  "dentist", "dental", "orthodont", "endodont", "periodont",
-  "oral", "tooth", "teeth", "smile", "implant", "prosthodont",
-  "maxillofacial", "clinic", "medical", "doctor", "hospital",
-  "dermat", "physio", "chiropr", "optom", "veterinar",
-  "health", "wellness", "cosmetic", "aesthetic", "beauty",
-  "spa", "salon", "skin", "hair", "laser",
+const STRICT_DENTAL_KEYWORDS = [
+  "dentist",
+  "dental",
+  "orthodont",
+  "endodont",
+  "periodont",
+  "prosthodont",
+  "tooth",
+  "teeth",
+  "implantolog",
+  "maxillofacial",
+  "oral surgeon",
+  "oral surgery",
 ];
 
 /**
- * Check if a business category suggests it could benefit from a dental/medical demo site
+ * Check if a business is strictly a dental practice.
+ * Returns false for all other categories (gyms, salons, medical clinics, hospitals, spas, etc.)
  */
-export function isDentalOrMedicalBusiness(category: string): boolean {
-  if (!category) return false;
-  const lower = category.toLowerCase();
-  return DENTAL_KEYWORDS.some((kw) => lower.includes(kw));
+export function isDentalOrMedicalBusiness(
+  category?: string | null,
+  name?: string | null
+): boolean {
+  const cat = (category || "").toLowerCase().trim();
+  const n = (name || "").toLowerCase().trim();
+
+  // If no category and no name, return false
+  if (!cat && !n) return false;
+
+  // Exclude veterinary / pet clinics
+  if (
+    cat.includes("veterin") ||
+    n.includes("veterin") ||
+    cat.includes("pet ") ||
+    n.includes("pet ") ||
+    cat.includes("animal") ||
+    n.includes("animal")
+  ) {
+    return false;
+  }
+
+  // Check category against strict dental keywords
+  if (STRICT_DENTAL_KEYWORDS.some((kw) => cat.includes(kw))) {
+    return true;
+  }
+
+  // Check business name (e.g. "Smile Studio Dental", "Karama Dental Center")
+  if (STRICT_DENTAL_KEYWORDS.some((kw) => n.includes(kw))) {
+    return true;
+  }
+
+  return false;
 }
+
+export const isDentalBusiness = isDentalOrMedicalBusiness;
 
 /**
  * Auto-detect regulatory license text based on city/country

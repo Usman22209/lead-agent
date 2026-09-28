@@ -568,7 +568,7 @@ function LeadsPipelineContent() {
 
                         <td className="py-3 px-3 text-right">
                           <div className="flex items-center justify-end gap-1.5">
-                            {isDentalOrMedicalBusiness(lead.category || "") && (
+                            {isDentalOrMedicalBusiness(lead.category, lead.name) && (
                               <a
                                 href={generateDentalDemoUrl({
                                   name: lead.name,

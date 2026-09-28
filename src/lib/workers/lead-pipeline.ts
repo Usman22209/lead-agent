@@ -108,7 +108,7 @@ export class LeadPipeline {
 
       // 5. JIT Gemini 2.5 Flash Audit
       let audit: GeminiAuditResult;
-      const isDental = isDentalOrMedicalBusiness(business.category || "");
+      const isDental = isDentalOrMedicalBusiness(business.category, business.name);
       if (business.lead?.aiAnalysis) {
         try {
           audit = JSON.parse(business.lead.aiAnalysis);
