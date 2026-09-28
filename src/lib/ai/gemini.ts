@@ -34,22 +34,22 @@ export function cleanJsonOutput(text: string): string {
 // 🧠 DYNAMIC ACTIVE MODEL DISCOVERY & CASCADING AI ENGINE
 // (Pattern from Marketing Agent for 100% resilient model compatibility)
 // ═══════════════════════════════════════════════════════════════════
-const DEFAULT_CANDIDATE_MODELS = [
+const PREFERRED_MODELS = [
   "gemini-2.5-flash",
   "gemini-2.0-flash",
-  "gemini-2.0-flash-exp",
-  "gemini-flash-latest",
   "gemini-1.5-flash",
-  "gemini-1.5-flash-latest",
-  "gemini-pro-latest",
+  "gemini-flash-latest",
+  "gemini-1.5-pro",
 ];
+
+const DEFAULT_CANDIDATE_MODELS = PREFERRED_MODELS;
 
 let cachedAvailableModels: string[] | null = null;
 let lastModelFetchTime = 0;
 
 /**
- * Dynamically queries Google AI Studio for all active models supported by the user's API key.
- * This completely prevents 404/400 errors from retired or regionally unavailable models.
+ * Dynamically queries Google AI Studio for active models supported by the user's API key.
+ * Prioritizes standard production Flash models and filters out experimental/lite/tts models.
  */
 export async function getLiveAvailableModels(apiKey: string): Promise<string[]> {
   const now = Date.now();
@@ -78,25 +78,17 @@ export async function getLiveAvailableModels(apiKey: string): Promise<string[]> 
               !name.includes("image") &&
               !name.includes("imagen") &&
               !name.includes("audio") &&
-              !name.includes("robotics")
+              !name.includes("robotics") &&
+              !name.includes("lite") &&
+              !name.includes("live")
           )
-          // Prioritize Flash and lightweight high-speed models
           .sort((a: string, b: string) => {
-            const aIs25Flash = a.includes("2.5-flash");
-            const bIs25Flash = b.includes("2.5-flash");
-            if (aIs25Flash && !bIs25Flash) return -1;
-            if (!aIs25Flash && bIs25Flash) return 1;
-
-            const aIs2Flash = a.includes("2.0-flash");
-            const bIs2Flash = b.includes("2.0-flash");
-            if (aIs2Flash && !bIs2Flash) return -1;
-            if (!aIs2Flash && bIs2Flash) return 1;
-
-            const aIsFlash = a.includes("flash");
-            const bIsFlash = b.includes("flash");
-            if (aIsFlash && !bIsFlash) return -1;
-            if (!aIsFlash && bIsFlash) return 1;
-            return 0;
+            const indexA = PREFERRED_MODELS.indexOf(a);
+            const indexB = PREFERRED_MODELS.indexOf(b);
+            if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+            if (indexA !== -1) return -1;
+            if (indexB !== -1) return 1;
+            return a.localeCompare(b);
           });
 
         if (validModels.length > 0) {
@@ -132,7 +124,7 @@ export async function callGeminiAPIWithCascade(
   }
 
   const fullPrompt = systemPrompt ? `${systemPrompt}\n\nTask:\n${prompt}` : prompt;
-  const availableModels = await getLiveAvailableModels(key);
+  const availableModels = (await getLiveAvailableModels(key)).slice(0, 5);
   let lastError: any = null;
 
   for (let i = 0; i < availableModels.length; i++) {
