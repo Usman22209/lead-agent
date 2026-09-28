@@ -27,9 +27,11 @@ import {
   TrendingUp,
   History,
   Layers,
+  Eye,
 } from "lucide-react";
 import { PriorityBadge } from "./PriorityBadge";
 import { ScoreGauge } from "./ScoreGauge";
+import { isDentalOrMedicalBusiness, generateDentalDemoUrl } from "@/lib/outreach/dental-demo-url";
 
 interface LeadDetailModalProps {
   lead: any;
@@ -214,6 +216,20 @@ export function LeadDetailModal({
   } catch {
     reasons = [];
   }
+
+  const isDental = isDentalOrMedicalBusiness(lead.category || "");
+  const demoSiteUrl = isDental
+    ? generateDentalDemoUrl({
+        name: lead.name,
+        category: lead.category,
+        city: lead.city,
+        area: lead.address?.split(",")[0]?.trim(),
+        address: lead.address,
+        phone: lead.phone,
+        rating: lead.lead?.score ? lead.lead.score / 20 : lead.rating,
+        reviewCount: lead.reviewCount,
+      })
+    : null;
 
   const handleCopyPhone = () => {
     if (!lead.phone) return;
@@ -569,6 +585,36 @@ export function LeadDetailModal({
                 </div>
               </div>
 
+              {demoSiteUrl && (
+                <div className="p-3.5 rounded-xl bg-gradient-to-r from-violet-950/60 to-indigo-950/60 border border-violet-500/30 flex items-center justify-between gap-3 shadow-md">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="p-2 rounded-lg bg-violet-500/20 text-violet-300 flex-shrink-0">
+                      <Sparkles className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-semibold text-white">Dynamic Patient Portal Demo Ready</p>
+                        <span className="px-1.5 py-0.2 rounded bg-violet-500/20 text-violet-300 text-[10px] font-mono border border-violet-500/30">Live Preview</span>
+                      </div>
+                      <p className="text-[11px] text-violet-200/70 truncate mt-0.5">
+                        Pre-loaded with 1-tap WhatsApp booking, Smile Assessment & verified Google rating for {lead.name}
+                      </p>
+                    </div>
+                  </div>
+                  <a
+                    href={demoSiteUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-sm transition whitespace-nowrap flex-shrink-0"
+                    title="Open live personalized demo website"
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    <span>Preview Demo Site</span>
+                    <ExternalLink className="h-3 w-3 opacity-70" />
+                  </a>
+                </div>
+              )}
+
               {aiAudit?.suggestedPitch ? (
                 <div className="space-y-4">
                   {/* WhatsApp Pitch Card */}
@@ -896,6 +942,19 @@ export function LeadDetailModal({
               <Zap className="h-3.5 w-3.5 fill-white" />
               {isInstantSending ? "Pitching..." : "Instant AI Pitch"}
             </button>
+
+            {demoSiteUrl && (
+              <a
+                href={demoSiteUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-semibold flex items-center gap-1.5 shadow-sm transition cursor-pointer"
+                title="Preview personalized dental demo site for this lead"
+              >
+                <Eye className="h-3.5 w-3.5" />
+                <span>Demo Site</span>
+              </a>
+            )}
 
             <a
               href={`/api/export?id=${lead.id}&format=html`}

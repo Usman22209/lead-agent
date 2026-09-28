@@ -27,16 +27,18 @@ import {
   XCircle,
   Info,
   ArrowDown,
+  Eye,
 } from "lucide-react";
+import { isDentalOrMedicalBusiness, generateDentalDemoUrl } from "@/lib/outreach/dental-demo-url";
 
 const POPULAR_NICHES = [
-  "Gyms & Fitness",
   "Dentists",
+  "Medical Clinics",
+  "Gyms & Fitness",
   "Salons & Spas",
   "Restaurants",
   "Real Estate",
   "Law Firms",
-  "Medical Clinics",
   "Car Dealerships",
 ];
 
@@ -50,7 +52,7 @@ function DiscoveryContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const [keyword, setKeyword] = useState(searchParams.get("keyword") || "Gyms & Fitness");
+  const [keyword, setKeyword] = useState(searchParams.get("keyword") || "Dentists");
   const [location, setLocation] = useState(searchParams.get("location") || "London");
   const [limit, setLimit] = useState(15);
   const [isScanning, setIsScanning] = useState(false);
@@ -614,6 +616,28 @@ function DiscoveryContent() {
                                   <span>Inspect</span>
                                   <ArrowRight className="h-3 w-3" />
                                 </button>
+
+                                {isDentalOrMedicalBusiness(lead.category || "") && (
+                                  <a
+                                    href={generateDentalDemoUrl({
+                                      name: lead.name,
+                                      category: lead.category,
+                                      city: lead.city,
+                                      area: lead.address?.split(",")[0]?.trim(),
+                                      address: lead.address,
+                                      phone: lead.phone,
+                                      rating: lead.rating,
+                                      reviewCount: lead.reviewCount,
+                                    })}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-violet-600/15 hover:bg-violet-600/30 text-violet-300 text-xs font-semibold border border-violet-500/25 transition cursor-pointer"
+                                    title="Preview personalized dental demo site for this lead"
+                                  >
+                                    <Eye className="h-3 w-3" />
+                                    <span>Demo</span>
+                                  </a>
+                                )}
                               </div>
                             </td>
                           </tr>

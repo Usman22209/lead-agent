@@ -32,8 +32,10 @@ import {
   ArrowRight,
   FileText,
   Layers,
+  Eye,
 } from "lucide-react";
 import Link from "next/link";
+import { isDentalOrMedicalBusiness, generateDentalDemoUrl } from "@/lib/outreach/dental-demo-url";
 
 function LeadsPipelineContent() {
   const searchParams = useSearchParams();
@@ -565,13 +567,36 @@ function LeadsPipelineContent() {
                         </td>
 
                         <td className="py-3 px-3 text-right">
-                          <Link
-                            href={`/leads/${lead.id}`}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 text-xs font-semibold border border-indigo-500/20 transition cursor-pointer"
-                          >
-                            <span>Inspect</span>
-                            <ArrowRight className="h-3 w-3" />
-                          </Link>
+                          <div className="flex items-center justify-end gap-1.5">
+                            {isDentalOrMedicalBusiness(lead.category || "") && (
+                              <a
+                                href={generateDentalDemoUrl({
+                                  name: lead.name,
+                                  category: lead.category,
+                                  city: lead.city,
+                                  area: lead.address?.split(",")[0]?.trim(),
+                                  address: lead.address,
+                                  phone: lead.phone,
+                                  rating: lead.lead?.score ? lead.lead.score / 20 : lead.rating,
+                                  reviewCount: lead.reviewCount,
+                                })}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-violet-600/15 hover:bg-violet-600/30 text-violet-300 text-xs font-semibold border border-violet-500/25 transition cursor-pointer"
+                                title="Preview personalized dental demo site"
+                              >
+                                <Eye className="h-3 w-3" />
+                                <span>Demo</span>
+                              </a>
+                            )}
+                            <Link
+                              href={`/leads/${lead.id}`}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 text-xs font-semibold border border-indigo-500/20 transition cursor-pointer"
+                            >
+                              <span>Inspect</span>
+                              <ArrowRight className="h-3 w-3" />
+                            </Link>
+                          </div>
                         </td>
                       </tr>
                     );

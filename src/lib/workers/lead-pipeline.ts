@@ -3,6 +3,7 @@ import { generateGeminiAudit, sanitizePitchText, GeminiAuditResult } from "@/lib
 import { whatsAppManager } from "@/lib/outreach/whatsapp-service";
 import { EmailService } from "@/lib/outreach/email-service";
 import { EmailScraper } from "@/lib/collectors/email-scraper";
+import { isDentalOrMedicalBusiness } from "@/lib/outreach/dental-demo-url";
 import { QueueManager } from "./queue-manager";
 
 export interface PipelineDispatchResult {
@@ -107,9 +108,18 @@ export class LeadPipeline {
 
       // 5. JIT Gemini 2.5 Flash Audit
       let audit: GeminiAuditResult;
+      const isDental = isDentalOrMedicalBusiness(business.category || "");
       if (business.lead?.aiAnalysis) {
         try {
           audit = JSON.parse(business.lead.aiAnalysis);
+          // If this is a dental business but the cached pitch lacks the demo URL, regenerate it
+          if (
+            isDental &&
+            !audit.suggestedPitch?.whatsapp?.includes("dental-site") &&
+            !audit.suggestedPitch?.email?.includes("dental-site")
+          ) {
+            audit = await this.generateAudit(business);
+          }
         } catch {
           audit = await this.generateAudit(business);
         }
@@ -284,6 +294,7 @@ export class LeadPipeline {
       name: business.name,
       category: business.category,
       city: business.city,
+      address: business.address,
       rating: business.rating,
       reviewCount: business.reviewCount,
       website: business.website,

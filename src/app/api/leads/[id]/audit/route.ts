@@ -47,6 +47,13 @@ export async function POST(
       data: { status: "AUDITED" },
     });
 
+    if (business.lead) {
+      await prisma.lead.update({
+        where: { id: business.lead.id },
+        data: { aiAnalysis: JSON.stringify(audit) },
+      }).catch(() => null);
+    }
+
     return NextResponse.json({
       success: true,
       audit,
