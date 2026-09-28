@@ -71,8 +71,27 @@ export async function getLiveAvailableModels(apiKey: string): Promise<string[]> 
         const validModels = data.models
           .filter((m: any) => m.supportedGenerationMethods?.includes("generateContent"))
           .map((m: any) => m.name.replace(/^models\//, ""))
+          .filter(
+            (name: string) =>
+              !name.includes("tts") &&
+              !name.includes("embedding") &&
+              !name.includes("image") &&
+              !name.includes("imagen") &&
+              !name.includes("audio") &&
+              !name.includes("robotics")
+          )
           // Prioritize Flash and lightweight high-speed models
           .sort((a: string, b: string) => {
+            const aIs25Flash = a.includes("2.5-flash");
+            const bIs25Flash = b.includes("2.5-flash");
+            if (aIs25Flash && !bIs25Flash) return -1;
+            if (!aIs25Flash && bIs25Flash) return 1;
+
+            const aIs2Flash = a.includes("2.0-flash");
+            const bIs2Flash = b.includes("2.0-flash");
+            if (aIs2Flash && !bIs2Flash) return -1;
+            if (!aIs2Flash && bIs2Flash) return 1;
+
             const aIsFlash = a.includes("flash");
             const bIsFlash = b.includes("flash");
             if (aIsFlash && !bIsFlash) return -1;
