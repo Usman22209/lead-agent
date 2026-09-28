@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, use } from "react";
+import React, { useState, useEffect, use, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Header } from "@/components/Header";
@@ -37,7 +37,9 @@ import {
   Send,
   Clock,
   History,
+  Eye,
 } from "lucide-react";
+import { isDentalOrMedicalBusiness, generateDentalDemoUrl } from "@/lib/outreach/dental-demo-url";
 
 export default function LeadDetailPage({
   params,
@@ -381,6 +383,28 @@ export default function LeadDetailPage({
             <FileText className="h-3.5 w-3.5 text-indigo-400" />
             <span>Print Dossier</span>
           </a>
+
+          {isDentalOrMedicalBusiness(lead.category || "") && (
+            <a
+              href={generateDentalDemoUrl({
+                name: lead.name,
+                category: lead.category,
+                city: lead.city,
+                area: lead.address?.split(",")[0]?.trim(),
+                address: lead.address,
+                phone: lead.phone,
+                rating: lead.lead?.score ? lead.lead.score / 20 : lead.rating,
+                reviewCount: lead.reviewCount,
+              })}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-sm transition"
+              title="Preview personalized dental demo site for this lead"
+            >
+              <Eye className="h-3.5 w-3.5" />
+              <span>Preview Demo Site</span>
+            </a>
+          )}
 
           {lead.phone && (
             <a

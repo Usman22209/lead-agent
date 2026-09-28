@@ -1,4 +1,5 @@
 import { RawBusinessLead } from "../types";
+import { isDentalOrMedicalBusiness, generateDentalDemoUrl } from "../outreach/dental-demo-url";
 
 export interface GeminiAuditResult {
   businessSummary: string;
@@ -231,8 +232,64 @@ export async function runGeminiLeadAnalysis(
   business: RawBusinessLead,
   apiKey?: string
 ): Promise<GeminiAuditResult> {
+  // Check if this is a dental/medical business and generate demo URL
+  const isDental = isDentalOrMedicalBusiness(business.category || "");
+  const demoUrl = isDental
+    ? generateDentalDemoUrl({
+        name: business.name,
+        category: business.category,
+        city: business.city,
+        area: business.address?.split(",")[0]?.trim(),
+        address: business.address,
+        phone: business.phone,
+        rating: business.rating,
+        reviewCount: business.reviewCount,
+      })
+    : null;
+
   const systemPrompt = `You are an elite SMB Digital Growth & Outbound Sales Strategist.
-Your job is to analyze local businesses found on Google Maps, diagnose their digital presence, find revenue bottlenecks, and generate highly compelling personalized pitches for websites & digital upgrades.`;
+Your job is to analyze local businesses found on Google Maps, diagnose their digital presence, find revenue bottlenecks, and generate highly compelling personalized pitches for websites & digital upgrades.${
+    isDental
+      ? `
+
+CRITICAL CONTEXT — DENTAL/MEDICAL DEMO SITE ENGINE:
+We have a live, ultra-premium dental patient portal that generates personalized clinic websites on-the-fly.
+A custom demo has ALREADY been generated for this clinic. The live preview URL is:
+${demoUrl}
+
+This demo site features:
+- Direct 1-tap WhatsApp chair reservation connected to the clinic's real phone number
+- Interactive Smile Assessment Quiz pre-configured for their area
+- Before/After interactive smile transformation sliders
+- Verified Google reviews dynamically integrated with their real rating
+- Hospital-grade trust modules with their accreditation/license
+
+You MUST prominently include this exact demo URL in ALL outreach pitches (whatsapp & email).
+Frame it as: "We took the liberty of building a custom patient portal specifically for {clinic_name}" and include the URL.`
+      : ""
+  }`;
+
+  const hasSite = Boolean(business.website && business.website.trim().length > 0);
+
+  const dentalAuditContext = isDental
+    ? `
+DENTAL BUSINESS DETECTED — APPLY DENTAL-SPECIFIC OUTREACH STRATEGY:
+${
+        hasSite
+          ? `This clinic HAS an existing website. Diagnose these 4 common revenue leaks:
+1. Booking Friction: Forcing patients into tedious email forms rather than instant 1-tap WhatsApp booking
+2. No Interactive Visualization: No Before/After sliders for veneers, whitening, implants
+3. Slow Mobile Performance: Clunky desktop themes on mobile where 82% of patients search
+4. Disconnected from Google Reviews: No high-trust verified Google review integration`
+          : `This clinic has NO website (only Google Maps / socials). Highlight these critical losses:
+1. Google Maps Drop-off: Patients find their rating but click to competitors who showcase credentials
+2. Missing Search Engine Authority: Invisible to high-intent queries like "Best Dental Implants in ${business.city}"
+3. No 24/7 Digital Intake: Missing after-hours booking when reception is closed`
+      }
+
+The personalized demo site URL to include in pitches is: ${demoUrl}
+`
+    : "";
 
   const prompt = `
 Analyze the following local business profile:
@@ -244,12 +301,18 @@ Analyze the following local business profile:
 - Current Website: ${business.website || "NONE (No website detected)"}
 - Google Rating: ${business.rating || 0} stars
 - Google Reviews: ${business.reviewCount || 0} total reviews
-
+${dentalAuditContext}
 IMPORTANT PERSONALIZATION RULES FOR OUTREACH PITCHES:
 1. Address the business directly: start with "Hi ${business.name} team," or "Hi ${business.name},"
 2. NEVER use template bracket placeholders like [Name], [Business Name], [Owner's Name], [Your Name], [Insert Link], or ANY square brackets [...].
 3. The pitch must be completely written out and ready to dispatch immediately.
-4. Sign off naturally as "Usman | Web Specialist" or "Usman".
+4. Sign off naturally as "Usman | Web Specialist" or "Usman".${
+    isDental && demoUrl
+      ? `
+5. MUST include this exact demo URL in the whatsapp and email pitches: ${demoUrl}
+6. Frame the demo as: "We went ahead and built an interactive patient portal specifically customized for ${business.name}" followed by the URL.`
+      : ""
+  }
 
 Provide a strategic analysis formatted STRICTLY in this JSON structure:
 {
@@ -271,11 +334,11 @@ Provide a strategic analysis formatted STRICTLY in this JSON structure:
     "Specific website feature 4"
   ],
   "suggestedPitch": {
-    "whatsapp": "A short, punchy 2-3 sentence personalized WhatsApp message starting with 'Hi ${business.name} team,' referencing their ${business.reviewCount || 0} Google reviews and proposing a bespoke website concept. Zero brackets.",
+    "whatsapp": "A short, punchy 2-3 sentence personalized WhatsApp message starting with 'Hi ${business.name} team,' referencing their ${business.reviewCount || 0} Google reviews and proposing a bespoke website concept.${isDental ? " MUST include the demo URL." : ""} Zero brackets.",
     "whatsappFollowUp1": "A casual 2-sentence check-in follow-up starting with 'Hi ${business.name} team,' politely asking if they had a moment to check the concept.",
     "whatsappFollowUp2": "A specific value-add follow-up proposing a direct WhatsApp booking or reviews showcase for ${business.name}.",
     "whatsappBreakup": "A polite final breakup message letting ${business.name} know you will close their file and won't flood their inbox.",
-    "email": "A professional 2-paragraph outreach email pitch starting with 'Hi ${business.name} team,' with clear value proposition and invitation to view a demo. Zero brackets.",
+    "email": "A professional 2-paragraph outreach email pitch starting with 'Hi ${business.name} team,' with clear value proposition and invitation to view a demo.${isDental ? " MUST include the demo URL prominently." : ""} Zero brackets.",
     "emailFollowUp1": "A brief threaded follow-up email with 'Subject: Re: Quick concept for ${business.name}' checking in politely.",
     "emailFollowUp2": "A value-focused follow-up email highlighting a competitor gap or customer booking win for ${business.name}.",
     "emailBreakup": "A polite closing-the-loop breakup email with 'Subject: Closing the loop for ${business.name}'."
@@ -320,6 +383,29 @@ function generateFallbackAudit(business: RawBusinessLead): GeminiAuditResult {
   const reviews = business.reviewCount || 0;
   const rating = business.rating || 0;
 
+  // Generate dental demo URL if applicable
+  const isDental = isDentalOrMedicalBusiness(business.category || "");
+  const demoUrl = isDental
+    ? generateDentalDemoUrl({
+        name: business.name,
+        category: business.category,
+        city: business.city,
+        area: business.address?.split(",")[0]?.trim(),
+        address: business.address,
+        phone: business.phone,
+        rating: business.rating,
+        reviewCount: business.reviewCount,
+      })
+    : null;
+
+  const demoLine = demoUrl
+    ? `\n\nWe went ahead and built an interactive patient portal specifically customized for ${business.name}:\n\n👉 ${demoUrl}\n\nIt features direct 1-tap WhatsApp booking, an interactive Smile Assessment tool, and your verified Google reviews integrated.`
+    : "";
+
+  const demoEmailLine = demoUrl
+    ? `\n\nWe have already prepared a fully working demonstration tailored for ${business.name}:\n\n🔗 Interactive Preview: ${demoUrl}\n\nKey features pre-loaded: Direct WhatsApp Booking Engine, Interactive Smile Quiz, Before & After Sliders, and your ${reviews}+ Google reviews dynamically integrated.`
+    : "";
+
   if (!hasSite) {
     return {
       businessSummary: `${business.name} has built a trusted local presence in ${business.city} with ${rating.toFixed(1)} stars from ${reviews} reviews, but has zero digital conversion funnel.`,
@@ -340,12 +426,12 @@ function generateFallbackAudit(business: RawBusinessLead): GeminiAuditResult {
         "Embedded Google Maps & Verified Reviews Showcase",
       ],
       suggestedPitch: {
-        whatsapp: `Hi ${business.name}! We noticed your strong Google profile in ${business.city} with ${reviews} reviews (${rating}★). We created a custom website concept specifically for your business to help capture more appointments online. Would love to share the preview with you!`,
-        whatsappFollowUp1: `Hi ${business.name} team! Just following up on my note earlier regarding the custom website preview we built for you. Did you have a moment to take a look?`,
-        whatsappFollowUp2: `Hey ${business.name} team, quick thought — adding direct WhatsApp appointment booking to your Google profile could easily drive 25-30% more client inquiries each month. Happy to share a quick 2-min preview if you'd like!`,
+        whatsapp: `Hi ${business.name} team,\n\nI came across your Google listing in ${business.city} — your ${rating}★ rating across ${reviews}+ reviews is incredible.${demoLine}\n\nWould you be open to a quick look?`,
+        whatsappFollowUp1: `Hi ${business.name} team! Just following up on my note earlier regarding the custom preview we built for you. Did you have a moment to take a look?`,
+        whatsappFollowUp2: `Hey ${business.name} team, quick thought — adding direct WhatsApp appointment booking could easily drive 25-30% more client inquiries each month. Happy to share a quick 2-min preview if you'd like!`,
         whatsappBreakup: `Hi ${business.name} team, I assume you're focused on other priorities right now, so I won't flood your inbox. Feel free to reach out anytime if you'd ever like to expand your online presence!`,
-        email: `Subject: Custom website concept for ${business.name}\n\nHi Team ${business.name},\n\nI was looking at top-rated ${business.category} businesses in ${business.city} and came across your impressive Google profile (${reviews} reviews, ${rating} stars).\n\nWe noticed there isn't currently a dedicated website where clients can explore your full service offerings and book directly. Our team created a personalized demo concept showing how a modern web presence could streamline new inquiries for ${business.name}.\n\nWould you be open to a quick 5-minute walkthrough of the concept?`,
-        emailFollowUp1: `Subject: Re: Custom website concept for ${business.name}\n\nHi Team ${business.name},\n\nJust wanted to quickly follow up on my previous note. We put together a complimentary concept for ${business.name} to help convert more local Google searchers into booked clients.\n\nLet me know if you have 5 minutes this week to take a look!`,
+        email: `Subject: Custom Patient Growth Portal for ${business.name} (${rating}★ with ${reviews}+ Reviews)\n\nHi Team ${business.name},\n\nI was looking at top-rated ${business.category} businesses in ${business.city} and came across your impressive Google profile (${reviews} reviews, ${rating} stars).${demoEmailLine}\n\nWould you be open to a quick 5-minute walkthrough of the concept?\n\nBest regards,\nUsman | Web Specialist`,
+        emailFollowUp1: `Subject: Re: Custom portal for ${business.name}\n\nHi Team ${business.name},\n\nJust wanted to quickly follow up on my previous note. We put together a complimentary concept for ${business.name} to help convert more local Google searchers into booked clients.\n\nLet me know if you have 5 minutes this week to take a look!`,
         emailFollowUp2: `Subject: Quick idea for ${business.name}\n\nHi Team ${business.name},\n\nI was looking at similar ${business.category} businesses in ${business.city} and noticed that adding instant mobile booking and verified review badges increased their client inquiries significantly.\n\nWould you be open to seeing a 2-minute walkthrough of how we could implement this for ${business.name}?`,
         emailBreakup: `Subject: Closing the loop for ${business.name}\n\nHi Team ${business.name},\n\nI haven't heard back, so I assume this isn't a priority for ${business.name} right now — totally understand!\n\nI'll close our file here and won't follow up again. If priorities ever shift, feel free to reach back out anytime.`,
       },
@@ -370,11 +456,11 @@ function generateFallbackAudit(business: RawBusinessLead): GeminiAuditResult {
       "Automated Lead Capture & Fast Inquiry Form",
     ],
     suggestedPitch: {
-      whatsapp: `Hi ${business.name}! We reviewed your online presence and found 4 quick opportunities to increase booking conversions from mobile visitors. We'd love to share our audit!`,
+      whatsapp: `Hi ${business.name} team,\n\nI reviewed your online presence in ${business.city} and noticed a few bottlenecks that are likely costing you high-ticket bookings — especially around mobile booking friction and Google review integration.${demoLine}\n\nWould you be open to a quick 5-minute chat?`,
       whatsappFollowUp1: `Hi ${business.name} team! Just following up on the quick mobile conversion audit we prepared for ${business.name}. Let me know if you'd like me to send over the summary!`,
       whatsappFollowUp2: `Hey ${business.name} team, quick tip: implementing an instant WhatsApp booking bar on your site could capture visitors who bounce before calling. Happy to show you an example!`,
       whatsappBreakup: `Hi ${business.name} team, completely understand if you're busy right now. I'll pause follow-ups here. Wishing your team continued success!`,
-      email: `Subject: 4 conversion opportunities for ${business.name}\n\nHi Team ${business.name},\n\nWe recently conducted a complimentary digital presence audit for top ${business.category} businesses in ${business.city}.\n\nWhile your business has strong reputation metrics, we identified several conversion opportunities on your current site that could significantly increase inbound inquiries. Would you be open to reviewing the audit findings?`,
+      email: `Subject: 4 conversion opportunities for ${business.name}\n\nHi Team ${business.name},\n\nWe recently conducted a complimentary digital presence audit for top ${business.category} businesses in ${business.city}.${demoEmailLine}\n\nWhile your business has strong reputation metrics, we identified several conversion opportunities on your current site that could significantly increase inbound inquiries. Would you be open to reviewing the audit findings?\n\nBest regards,\nUsman | Web Specialist`,
       emailFollowUp1: `Subject: Re: 4 conversion opportunities for ${business.name}\n\nHi Team ${business.name},\n\nJust floating this to the top of your inbox. Did you get a chance to see the conversion notes for ${business.name}'s website?\n\nHappy to share the highlights whenever convenient!`,
       emailFollowUp2: `Subject: Quick win for ${business.name}\n\nHi Team ${business.name},\n\nOne of the biggest quick wins we saw was streamlining the mobile booking flow for ${business.city} customers. Would you be interested in a 2-minute screen recording showing how to fix this?`,
       emailBreakup: `Subject: Closing the loop for ${business.name}\n\nHi Team ${business.name},\n\nI haven't heard back, so I assume this is not a priority right now. I will close our file here and won't reach out again. Best of luck with ${business.name}!`,
