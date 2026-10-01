@@ -1,5 +1,9 @@
 import { RawBusinessLead } from "../types";
-import { isDentalOrMedicalBusiness, generateDentalDemoUrl } from "../outreach/dental-demo-url";
+import {
+  isDentalOrMedicalBusiness,
+  isDentalOnlyBusiness,
+  generateDentalDemoUrl,
+} from "../outreach/dental-demo-url";
 
 export interface GeminiAuditResult {
   businessSummary: string;
@@ -373,6 +377,22 @@ Provide a strategic analysis formatted STRICTLY in this JSON structure:
       if (sp.emailFollowUp1) sp.emailFollowUp1 = sanitizePitchText(sp.emailFollowUp1, business);
       if (sp.emailFollowUp2) sp.emailFollowUp2 = sanitizePitchText(sp.emailFollowUp2, business);
       if (sp.emailBreakup) sp.emailBreakup = sanitizePitchText(sp.emailBreakup, business);
+
+      // GUARANTEE: For dental practices, ensure demo URL is present in the initial pitch and step 1 follow-up
+      if (isDental && demoUrl) {
+        if (sp.whatsapp && !sp.whatsapp.includes("dental-site")) {
+          sp.whatsapp += `\n\n👉 Preview: ${demoUrl}`;
+        }
+        if (sp.email && !sp.email.includes("dental-site")) {
+          sp.email += `\n\n🔗 Interactive Demo: ${demoUrl}`;
+        }
+        if (sp.whatsappFollowUp1 && !sp.whatsappFollowUp1.includes("dental-site")) {
+          sp.whatsappFollowUp1 += `\n\nHere is the interactive demo again: ${demoUrl}`;
+        }
+        if (sp.emailFollowUp1 && !sp.emailFollowUp1.includes("dental-site")) {
+          sp.emailFollowUp1 += `\n\nHere is the interactive demo again: ${demoUrl}`;
+        }
+      }
     }
 
     return parsed;
@@ -485,21 +505,56 @@ function generateFallbackAudit(business: RawBusinessLead): GeminiAuditResult {
  */
 export function getFollowUpPitch(
   audit: GeminiAuditResult | null,
-  business: { name: string; city: string; category?: string },
+  business: {
+    name: string;
+    city: string;
+    category?: string | null;
+    address?: string | null;
+    phone?: string | null;
+    rating?: number | null;
+    reviewCount?: number | null;
+  },
   channel: "WHATSAPP" | "EMAIL",
   step: number
 ): string {
+  const isDental = isDentalOnlyBusiness(business.category, business.name);
+  const demoUrl = isDental
+    ? generateDentalDemoUrl({
+        name: business.name,
+        category: business.category,
+        city: business.city,
+        address: business.address,
+        phone: business.phone,
+        rating: business.rating,
+        reviewCount: business.reviewCount,
+      })
+    : null;
+
   const sp = audit?.suggestedPitch;
+  let text = "";
+
   if (channel === "WHATSAPP") {
-    if (step === 1) return sp?.whatsappFollowUp1 || `Hi ${business.name} team! Just following up on my previous message regarding the website concept we built for you in ${business.city}. Did you have a chance to take a look?`;
-    if (step === 2) return sp?.whatsappFollowUp2 || `Hey ${business.name} team, quick thought — adding direct WhatsApp appointment booking could easily drive 25-30% more bookings each month. Happy to share a quick preview!`;
-    if (step === 3) return sp?.whatsappBreakup || `Hi ${business.name} team, I assume you're busy with other priorities right now, so I won't flood your messages. Feel free to ping me anytime if you'd like to explore this!`;
-    return sp?.whatsapp || `Hi ${business.name}! We noticed your great local presence in ${business.city} and put together a custom website concept for your business. Would love to share the preview with you!`;
+    if (step === 1) text = sp?.whatsappFollowUp1 || `Hi ${business.name} team! Just following up on my previous message regarding the website concept we built for you in ${business.city}. Did you have a chance to take a look?`;
+    else if (step === 2) text = sp?.whatsappFollowUp2 || `Hey ${business.name} team, quick thought — adding direct WhatsApp appointment booking could easily drive 25-30% more bookings each month. Happy to share a quick preview!`;
+    else if (step === 3) text = sp?.whatsappBreakup || `Hi ${business.name} team, I assume you're busy with other priorities right now, so I won't flood your messages. Feel free to ping me anytime if you'd like to explore this!`;
+    else text = sp?.whatsapp || `Hi ${business.name}! We noticed your great local presence in ${business.city} and put together a custom website concept for your business. Would love to share the preview with you!`;
+
+    // Guarantee dental demo URL is included in initial outreach or step 1 bump for dental practices
+    if (isDental && demoUrl && (step === 0 || step === 1) && !text.includes("dental-site")) {
+      text += `\n\n👉 Interactive Patient Portal: ${demoUrl}`;
+    }
+    return text;
   } else {
     // EMAIL
-    if (step === 1) return sp?.emailFollowUp1 || `Subject: Re: Quick concept for ${business.name}\n\nHi Team ${business.name},\n\nJust wanted to quickly follow up on my previous note. We put together a complimentary concept for ${business.name} to help convert more local Google searchers into clients.\n\nLet me know if you have 5 minutes this week to take a look!`;
-    if (step === 2) return sp?.emailFollowUp2 || `Subject: Quick idea for ${business.name}\n\nHi Team ${business.name},\n\nI was looking at similar businesses in ${business.city} and noticed that adding instant mobile booking increased their client inquiries significantly.\n\nWould you be open to seeing a 2-minute walkthrough of how we could implement this for ${business.name}?`;
-    if (step === 3) return sp?.emailBreakup || `Subject: Closing the loop for ${business.name}\n\nHi Team ${business.name},\n\nI haven't heard back, so I assume this isn't a priority for ${business.name} right now — totally understand!\n\nI'll close our file here and won't follow up again. If priorities ever shift, feel free to reach back out anytime.`;
-    return sp?.email || `Subject: Custom website concept for ${business.name}\n\nHi Team ${business.name},\n\nWe noticed your strong local presence in ${business.city} and created a personalized demo concept showing how a modern web presence could streamline new inquiries for ${business.name}.\n\nWould you be open to a quick 5-minute walkthrough of the concept?`;
+    if (step === 1) text = sp?.emailFollowUp1 || `Subject: Re: Quick concept for ${business.name}\n\nHi Team ${business.name},\n\nJust wanted to quickly follow up on my previous note. We put together a complimentary concept for ${business.name} to help convert more local Google searchers into clients.\n\nLet me know if you have 5 minutes this week to take a look!`;
+    else if (step === 2) text = sp?.emailFollowUp2 || `Subject: Quick idea for ${business.name}\n\nHi Team ${business.name},\n\nI was looking at similar businesses in ${business.city} and noticed that adding instant mobile booking increased their client inquiries significantly.\n\nWould you be open to seeing a 2-minute walkthrough of how we could implement this for ${business.name}?`;
+    else if (step === 3) text = sp?.emailBreakup || `Subject: Closing the loop for ${business.name}\n\nHi Team ${business.name},\n\nI haven't heard back, so I assume this isn't a priority for ${business.name} right now — totally understand!\n\nI'll close our file here and won't follow up again. If priorities ever shift, feel free to reach back out anytime.`;
+    else text = sp?.email || `Subject: Custom website concept for ${business.name}\n\nHi Team ${business.name},\n\nWe noticed your strong local presence in ${business.city} and created a personalized demo concept showing how a modern web presence could streamline new inquiries for ${business.name}.\n\nWould you be open to a quick 5-minute walkthrough of the concept?`;
+
+    // Guarantee dental demo URL is included in initial outreach or step 1 bump for dental practices
+    if (isDental && demoUrl && (step === 0 || step === 1) && !text.includes("dental-site")) {
+      text += `\n\n🔗 Interactive Demo Preview: ${demoUrl}`;
+    }
+    return text;
   }
 }
