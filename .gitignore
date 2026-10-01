@@ -19,11 +19,8 @@ dist/
 /dist
 
 # Environment Variables & Secrets
-.env
-.env*
 !.env.example
 .env*.local
-.env.local
 .env.development.local
 .env.test.local
 .env.production.local
@@ -65,8 +62,6 @@ coverage
 next-env.d.ts
 
 # IDEs and Editors
-.vscode/
-.vscode
 .idea/
 .idea
 *.swp
@@ -87,3 +82,8 @@ Thumbs.db
 .vercel
 
 ssh-key-*
+config.bat
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore
