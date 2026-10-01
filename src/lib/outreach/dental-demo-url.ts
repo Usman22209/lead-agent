@@ -188,8 +188,8 @@ export interface DentalDemoUrlParams {
   phone?: string | null;
   email?: string | null;
   website?: string | null;
-  rating?: number;
-  reviewCount?: number;
+  rating?: number | null;
+  reviewCount?: number | null;
   googlePlaceId?: string | null;
 }
 
